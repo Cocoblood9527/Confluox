@@ -53,5 +53,28 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
-      - name: Skeleton check
-        run: echo "Workflow skeleton ready for platform-specific steps"
+      - name: Upgrade pip
+        run: python -m pip install -U pip
+      - name: Install gateway dev dependencies
+        run: python -m pip install -e gateway[dev]
+      - name: Install gateway build tools
+        run: python -m pip install pyinstaller nuitka
+      - name: Build frontend
+        run: cd frontend && npm ci && npm run build
+      - name: Run gateway tests
+        run: cd gateway && python -m pytest tests -q
+      - name: Build gateway (dual track) on macOS
+        if: matrix.os == 'macos-latest'
+        run: cd gateway && ./scripts/build_gateway.sh --track all
+      - name: Verify gateway_artifact track selection on macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo test --manifest-path src-tauri/Cargo.toml gateway_artifact -- --nocapture
+      - name: Build tauri app (no bundle) on macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo tauri build --no-bundle --no-sign
+      - name: Ensure dist precondition on non-macOS
+        if: matrix.os != 'macos-latest'
+        run: mkdir -p dist/gateway
+      - name: Verify gateway_artifact track selection on non-macOS
+        if: matrix.os != 'macos-latest'
+        run: cargo test --manifest-path src-tauri/Cargo.toml gateway_artifact -- --nocapture
