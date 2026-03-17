@@ -3,3 +3,6 @@
 .worktrees/
 __pycache__/
 .pytest_cache/
+gateway/build/
+src-tauri/gen/
+src-tauri/target/
