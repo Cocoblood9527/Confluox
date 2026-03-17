@@ -6,6 +6,14 @@ GATEWAY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${GATEWAY_DIR}/.." && pwd)"
 DIST_ROOT="${CONFLUOX_GATEWAY_DIST_ROOT:-${REPO_DIR}/dist/gateway}"
 SCAN_REPORT="${CONFLUOX_GATEWAY_SCAN_REPORT:-${GATEWAY_DIR}/build/plugin-scan.json}"
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "python is required but neither python3 nor python was found in PATH" >&2
+  exit 1
+fi
 
 usage() {
   cat <<'EOF'
@@ -59,7 +67,7 @@ case "${PREFER}" in
 esac
 
 cd "${GATEWAY_DIR}"
-python3 scripts/scan_plugins.py --plugins-dir "${REPO_DIR}/plugins" --out "${SCAN_REPORT}" >/dev/null
+"${PYTHON_BIN}" scripts/scan_plugins.py --plugins-dir "${REPO_DIR}/plugins" --out "${SCAN_REPORT}" >/dev/null
 mkdir -p "${DIST_ROOT}"
 # Remove legacy single-track output path so Tauri resources only contain dual-track layout.
 rm -rf "${DIST_ROOT}/confluox-gateway"
