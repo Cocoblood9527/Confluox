@@ -6,14 +6,32 @@ GATEWAY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${GATEWAY_DIR}/.." && pwd)"
 DIST_ROOT="${CONFLUOX_GATEWAY_DIST_ROOT:-${REPO_DIR}/dist/gateway}"
 SCAN_REPORT="${CONFLUOX_GATEWAY_SCAN_REPORT:-${GATEWAY_DIR}/build/plugin-scan.json}"
-if command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-else
-  echo "python is required but neither python3 nor python was found in PATH" >&2
+
+resolve_python_bin() {
+  if [[ -n "${CONFLUOX_PYTHON_BIN:-}" ]]; then
+    if "${CONFLUOX_PYTHON_BIN}" -c "import sys" >/dev/null 2>&1; then
+      echo "${CONFLUOX_PYTHON_BIN}"
+      return 0
+    fi
+    echo "CONFLUOX_PYTHON_BIN is set but unusable: ${CONFLUOX_PYTHON_BIN}" >&2
+    exit 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+    echo "python3"
+    return 0
+  fi
+
+  if command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then
+    echo "python"
+    return 0
+  fi
+
+  echo "python is required but no usable interpreter was found (tried python3, python)" >&2
   exit 1
-fi
+}
+
+PYTHON_BIN="$(resolve_python_bin)"
 
 usage() {
   cat <<'EOF'
