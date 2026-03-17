@@ -169,9 +169,20 @@ mod tests {
 
         let err = resolve_gateway_binary_from_artifacts(&resource_dir).unwrap_err();
 
+        let nuitka_artifact = Path::new("gateway")
+            .join("nuitka")
+            .join("gateway-artifact.json")
+            .display()
+            .to_string();
+        let pyinstaller_artifact = Path::new("gateway")
+            .join("pyinstaller")
+            .join("gateway-artifact.json")
+            .display()
+            .to_string();
+
         assert!(err.contains("checked paths"));
-        assert!(err.contains("gateway/nuitka/gateway-artifact.json"));
-        assert!(err.contains("gateway/pyinstaller/gateway-artifact.json"));
+        assert!(err.contains(&nuitka_artifact));
+        assert!(err.contains(&pyinstaller_artifact));
     }
 
     #[test]
