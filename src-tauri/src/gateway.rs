@@ -1,3 +1,4 @@
+use crate::gateway_artifact::resolve_gateway_binary_from_artifacts;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
@@ -131,7 +132,7 @@ fn spawn_gateway_process(
         command
     } else {
         let resource_dir = app.path().resource_dir().map_err(|err| err.to_string())?;
-        let gateway_bin = resolve_bundled_gateway_binary(&resource_dir)?;
+        let gateway_bin = resolve_gateway_binary_from_artifacts(&resource_dir)?;
         Command::new(gateway_bin)
     };
 
@@ -150,43 +151,6 @@ fn spawn_gateway_process(
         .stderr(Stdio::inherit());
 
     cmd.spawn().map_err(|err| err.to_string())
-}
-
-fn executable_name(base: &str) -> String {
-    match env::consts::EXE_SUFFIX {
-        "" => base.to_string(),
-        suffix => format!("{base}.{suffix}"),
-    }
-}
-
-fn resolve_bundled_gateway_binary(resource_dir: &Path) -> Result<PathBuf, String> {
-    let gateway_name = executable_name("gateway");
-    let legacy_name = executable_name("confluox-gateway");
-    let candidates = vec![
-        resource_dir.join(&gateway_name),
-        resource_dir.join(&legacy_name),
-        resource_dir.join("gateway").join(&gateway_name),
-        resource_dir.join("gateway").join(&legacy_name),
-        resource_dir.join("confluox-gateway").join(&legacy_name),
-        resource_dir.join("confluox-gateway").join(&gateway_name),
-    ];
-
-    for candidate in &candidates {
-        if candidate.is_file() {
-            return Ok(candidate.to_path_buf());
-        }
-    }
-
-    let checked = candidates
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(format!(
-        "bundled gateway executable not found in resources dir {} (checked: {}). build gateway artifact first (gateway/scripts/build_gateway.sh) and include it via tauri bundle resources",
-        resource_dir.display(),
-        checked
-    ))
 }
 
 fn wait_for_ready_port(

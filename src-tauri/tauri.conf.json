@@ -21,7 +21,7 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../dist/gateway/confluox-gateway": "gateway"
+      "../dist/gateway": "gateway"
     }
   }
 }

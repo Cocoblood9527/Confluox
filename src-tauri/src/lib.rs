@@ -1,4 +1,5 @@
 mod gateway;
+mod gateway_artifact;
 
 use std::io;
 use std::sync::Arc;
