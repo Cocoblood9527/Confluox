@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+from .auth import BearerAuthMiddleware
 from .host_liveness import start_host_liveness_watch
 from .routes import create_system_router
 
@@ -62,9 +64,25 @@ def is_ready_payload(payload: Mapping[str, Any]) -> bool:
     return payload.get("status") == "ready"
 
 
-def create_app(on_shutdown: Callable[[], None] | None = None) -> FastAPI:
+def create_app(
+    *,
+    on_shutdown: Callable[[], None] | None = None,
+    auth_token: str | None = None,
+    allowed_origin: str | None = None,
+) -> FastAPI:
     app = FastAPI(title="Confluox Gateway", version="0.1.0")
     app.include_router(create_system_router(on_shutdown=on_shutdown))
+    if allowed_origin is not None:
+        if allowed_origin == "*":
+            raise ValueError("allowed_origin cannot be wildcard '*'")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[allowed_origin],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    if auth_token is not None:
+        app.add_middleware(BearerAuthMiddleware, token=auth_token)
     return app
 
 
