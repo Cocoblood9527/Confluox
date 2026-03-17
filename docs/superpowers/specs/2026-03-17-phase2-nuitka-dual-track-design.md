@@ -1,9 +1,9 @@
 # Phase 2 Nuitka 双轨打包执行导向 Spec
 
-> 状态：设计已在对话中确认，待用户审核书面稿
+> 状态：设计已通过用户书面确认，待进入实现执行
 > 日期：2026-03-17
 > 上位文档：`docs/superpowers/specs/2026-03-17-mvp-desktop-bridge-design.md`
-> 下游文档：`docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md`（待创建）
+> 下游文档：`docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md`
 
 ## 1. 文档定位
 
@@ -73,6 +73,7 @@
 - Tauri 运行时只认元数据，不认打包器细节；
 - 默认顺序：先尝试 Nuitka，再尝试 PyInstaller；
 - 任一轨道元数据存在且可解析，且 `entry` 存在即可启动；
+- 运行时不读取额外的“preferred track”文件或构建参数作为选择依据；
 - 双轨都不可用时，报错必须包含已检查路径与失败原因。
 
 ### 4.4 回退契约
@@ -88,7 +89,7 @@
 `gateway/scripts/build_gateway.sh` 作为总入口，支持：
 
 - `--track nuitka|pyinstaller|all`（默认 `all`）
-- `--prefer nuitka|pyinstaller`（默认 `nuitka`，用于运行时偏好）
+- `--prefer nuitka|pyinstaller`（默认 `nuitka`，仅用于构建顺序、日志与验收优先级，不改变运行时固定选择顺序）
 
 ### 5.2 分轨脚本
 
@@ -101,6 +102,7 @@
 
 - `tauri.conf.json` 需打包双轨资源；
 - Rust 端读取 `gateway-artifact.json` 进行选择；
+- Rust 端选择顺序固定为“Nuitka 优先，PyInstaller 兜底”；
 - 不再依赖硬编码产物名称作为主逻辑。
 
 ## 6. 测试与验收

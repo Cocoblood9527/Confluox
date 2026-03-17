@@ -44,6 +44,7 @@
 **Files:**
 - Create: `gateway/gateway/artifact_contract.py`
 - Create: `gateway/tests/test_artifact_contract.py`
+- Test: `gateway/tests/test_artifact_contract.py`
 
 - [ ] **Step 1: Write failing tests for artifact payload validation**
 
@@ -95,6 +96,8 @@ git commit -m "feat(gateway): add artifact metadata contract helpers"
 **Files:**
 - Create: `gateway/scripts/build_gateway_pyinstaller.sh`
 - Modify: `gateway/scripts/build_gateway.sh`
+- Create: `gateway/tests/test_build_gateway_cli.py`
+- Test: `gateway/tests/test_build_gateway_cli.py`
 
 - [ ] **Step 1: Write failing test for PyInstaller artifact metadata output**
 
@@ -112,7 +115,11 @@ def test_pyinstaller_track_writes_artifact_file() -> None:
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py -q`  
 Expected: FAIL because script and output path contract do not exist yet.
 
-- [ ] **Step 3: Extract PyInstaller logic into dedicated track script**
+- [ ] **Step 3: Create the dedicated PyInstaller track script**
+
+Create `gateway/scripts/build_gateway_pyinstaller.sh` with the current PyInstaller invocation and shared plugin scan inputs.
+
+- [ ] **Step 4: Update the output layout and metadata write**
 
 Implementation requirements:
 - Keep plugin scan + hidden imports behavior.
@@ -120,12 +127,16 @@ Implementation requirements:
 - Write `gateway-artifact.json` via `artifact_contract.py`.
 - Keep executable name compatibility (`confluox-gateway`).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 5: Update the entry script to call the track script**
+
+Modify `gateway/scripts/build_gateway.sh` so `--track pyinstaller` delegates to `build_gateway_pyinstaller.sh`.
+
+- [ ] **Step 6: Run test to verify it passes**
 
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py::test_pyinstaller_track_writes_artifact_file -q`  
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add gateway/scripts/build_gateway_pyinstaller.sh gateway/scripts/build_gateway.sh gateway/tests/test_build_gateway_cli.py
@@ -139,6 +150,7 @@ git commit -m "refactor(gateway): split pyinstaller track script with artifact m
 **Files:**
 - Create: `gateway/scripts/build_gateway_nuitka.sh`
 - Modify: `gateway/tests/test_build_gateway_cli.py`
+- Test: `gateway/tests/test_build_gateway_cli.py`
 
 - [ ] **Step 1: Write failing test for Nuitka track artifact output**
 
@@ -154,7 +166,7 @@ def test_nuitka_track_writes_artifact_file() -> None:
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py::test_nuitka_track_writes_artifact_file -q`  
 Expected: FAIL due to missing Nuitka script/track.
 
-- [ ] **Step 3: Implement Nuitka track script**
+- [ ] **Step 3: Create the Nuitka track script**
 
 Implementation requirements:
 - macOS-only guard (`uname` check, clear error message on unsupported OS).
@@ -163,12 +175,16 @@ Implementation requirements:
 - Include plugin resources.
 - Write `gateway-artifact.json` with track=`nuitka`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Hook the entry script to the new track**
+
+Modify `gateway/scripts/build_gateway.sh` so `--track nuitka` delegates to `build_gateway_nuitka.sh`.
+
+- [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py::test_nuitka_track_writes_artifact_file -q`  
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add gateway/scripts/build_gateway_nuitka.sh gateway/tests/test_build_gateway_cli.py
@@ -182,6 +198,7 @@ git commit -m "feat(gateway): add nuitka packaging track for macos"
 **Files:**
 - Modify: `gateway/scripts/build_gateway.sh`
 - Modify: `gateway/tests/test_build_gateway_cli.py`
+- Test: `gateway/tests/test_build_gateway_cli.py`
 
 - [ ] **Step 1: Write failing tests for `--track` and `--prefer` strategy**
 
@@ -196,20 +213,25 @@ def test_prefer_flag_is_emitted_for_runtime_selection() -> None: ...
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py -q`  
 Expected: FAIL on strategy assertions.
 
-- [ ] **Step 3: Implement strategy in entry script**
+- [ ] **Step 3: Implement `--track` parsing and exit-code behavior**
 
 Requirements:
 - Parse `--track nuitka|pyinstaller|all` (default `all`).
-- Parse `--prefer nuitka|pyinstaller` (default `nuitka`).
 - `all` mode should run both tracks, tolerate single-track failure, and return non-zero only if both fail.
-- Emit chosen preference into a small preference file in `dist/gateway/` for runtime hint (e.g. `artifact-prefer.txt`).
 
-- [ ] **Step 4: Run tests to verify pass**
+- [ ] **Step 4: Implement `--prefer` as build-order only**
+
+Requirements:
+- Parse `--prefer nuitka|pyinstaller` (default `nuitka`).
+- `--prefer` only controls execution order, logging, and验收优先级。
+- Rust 运行时不得读取额外 preference 文件。
+
+- [ ] **Step 5: Run tests to verify pass**
 
 Run: `cd gateway && python3 -m pytest tests/test_build_gateway_cli.py -q`  
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add gateway/scripts/build_gateway.sh gateway/tests/test_build_gateway_cli.py
@@ -224,6 +246,7 @@ git commit -m "feat(gateway): add dual-track strategy flags for gateway build en
 - Create: `src-tauri/src/gateway_artifact.rs`
 - Modify: `src-tauri/src/gateway.rs`
 - Modify: `src-tauri/src/lib.rs`
+- Test: `src-tauri/src/gateway_artifact.rs`
 
 - [ ] **Step 1: Write failing Rust unit tests for track selection**
 
@@ -250,7 +273,7 @@ Expected: FAIL because module and implementation do not exist.
 Requirements:
 - Read `gateway-artifact.json` from `resources/gateway/nuitka` and `resources/gateway/pyinstaller`.
 - Validate `entry` exists before selection.
-- Respect preference hint (`artifact-prefer.txt`) while preserving fallback.
+- Ignore build-time `--prefer` once resources are packaged.
 - Return actionable error with checked paths.
 
 - [ ] **Step 4: Replace old candidate-guess logic in `gateway.rs`**
@@ -275,6 +298,7 @@ git commit -m "feat(tauri): resolve bundled gateway from artifact metadata with 
 
 **Files:**
 - Modify: `src-tauri/tauri.conf.json`
+- Test: `src-tauri/tauri.conf.json` (bundle verification via release build)
 
 - [ ] **Step 1: Write failing integration expectation**
 
@@ -312,6 +336,7 @@ git commit -m "build(tauri): package dual-track gateway artifacts as resources"
 **Files:**
 - Modify: `docs/superpowers/specs/2026-03-17-phase2-nuitka-dual-track-design.md`
 - Modify: `docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md` (checklist status update)
+- Test: end-to-end command suite in this task
 
 - [ ] **Step 1: Run full verification suite**
 
@@ -357,9 +382,9 @@ git commit -m "docs: record phase2 nuitka dual-track verification evidence"
 
 ## Plan Review Loop Result
 
-当前会话未启用外部 plan reviewer 子代理调用，已执行本地自审。  
-如需严格子代理审阅，可在你明确授权“并行子代理审阅”后补跑一轮 `plan-document-reviewer`。
+当前会话已完成本地自审。  
+严格 superpowers 流程下，外部 `plan-document-reviewer` 子代理审阅仍待你明确授权后补跑；在补跑前，本计划应视为“用户已确认、外部 reviewer 未执行”的状态。
 
 ## Execution Handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md`. Ready to execute?
+Plan complete and saved to `docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md`. 在你接受“先按当前计划执行、后补 reviewer”或明确授权子代理审阅后，即可进入实现。
