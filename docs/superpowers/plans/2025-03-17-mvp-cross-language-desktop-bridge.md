@@ -539,6 +539,26 @@ git commit -m "chore: package Python gateway and integrate with Tauri build"
 
 ---
 
+## 执行状态（2026-03-17）
+
+- [x] Task 1 - Task 14 已按计划落地到代码与提交历史。
+- [x] Gateway 单元测试已覆盖 config、ready_file、system routes、auth、host liveness、process manager、resource resolver、plugin loader。
+- [x] Tauri 开发态已成功启动 sidecar，并确认写入 `ready_file`。
+- [x] PyInstaller 轨道已跑通，扫描脚本先执行，再生成冻结产物。
+- [x] 冻结产物已通过冒烟验证：可写 `ready_file`，并可通过 `/api/system/shutdown` 正常退出。
+- [x] Tauri 构建态验证已执行：`cargo tauri build --no-bundle --no-sign` 成功。
+
+已执行的关键验证命令：
+
+- `python3 -m pytest tests -q`
+- `npm run build`
+- `cargo build --manifest-path src-tauri/Cargo.toml`
+- `cargo tauri dev --no-watch`
+- `./gateway/scripts/build_gateway.sh`
+- `cargo tauri build --no-bundle --no-sign`
+
+---
+
 ## 不包含在 MVP（留待 Phase 2/3）
 
 - 服务型插件、MCP 插件、OpenAPI 聚合、SSE、WebSocket 代理、插件市场与启停管理界面。
