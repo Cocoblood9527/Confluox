@@ -74,12 +74,8 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
-      - name: Run gateway tests (non-Windows)
-        if: matrix.os != 'windows-latest'
+      - name: Run gateway tests
         run: cd gateway && python -m pytest tests -q
-      - name: Run gateway tests (Windows baseline subset)
-        if: matrix.os == 'windows-latest'
-        run: cd gateway && python -m pytest tests -q -k "not build_gateway_cli"
       - name: Build gateway (dual track) on macOS
         if: matrix.os == 'macos-latest'
         run: cd gateway && ./scripts/build_gateway.sh --track all
@@ -89,12 +85,9 @@ jobs:
       - name: Build tauri app (no bundle) on macOS
         if: matrix.os == 'macos-latest'
         run: cargo tauri build --no-bundle --no-sign
-      - name: Ensure dist precondition on Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+      - name: Ensure dist precondition on non-macOS
+        if: matrix.os != 'macos-latest'
         run: mkdir -p dist/gateway
-      - name: Verify gateway_artifact track selection on Ubuntu
-        if: matrix.os == 'ubuntu-latest'
+      - name: Verify gateway_artifact track selection on non-macOS
+        if: matrix.os != 'macos-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml gateway_artifact -- --nocapture
-      - name: Skip Rust gateway_artifact check on Windows (documented CI baseline)
-        if: matrix.os == 'windows-latest'
-        run: echo "Windows CI baseline skips Rust gateway_artifact check in Phase 3; macOS+Ubuntu cover Rust track verification."
