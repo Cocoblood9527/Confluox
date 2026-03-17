@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -22,8 +22,8 @@ def _run_build(
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["CONFLUOX_GATEWAY_TEST_MODE"] = "1"
-    # Pin script interpreter name per-host to avoid Windows python3 Store aliases.
-    env["CONFLUOX_PYTHON_BIN"] = "python3" if shutil.which("python3") else "python"
+    # Reuse the current test interpreter to avoid PATH alias differences across OSes.
+    env["CONFLUOX_PYTHON_BIN"] = sys.executable
     env["CONFLUOX_GATEWAY_DIST_ROOT"] = str(tmp_path / "dist" / "gateway")
     env["CONFLUOX_GATEWAY_SCAN_REPORT"] = str(tmp_path / "build" / "plugin-scan.json")
     env["CONFLUOX_GATEWAY_BUILD_ROOT"] = str(tmp_path / "build")
