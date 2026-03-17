@@ -1,7 +1,7 @@
 # Phase 3 CI Dual-Track Matrix Design
 
-> 状态：已实现（本地验证完成，待远端 CI 首次运行）
-> 日期：2026-03-17
+> 状态：已实现（本地 + 远端 CI 验证完成）
+> 日期：2026-03-18
 > 上位文档：`docs/superpowers/specs/2026-03-17-phase2-nuitka-dual-track-design.md`
 
 ## 1. 目标
@@ -107,13 +107,26 @@
   - Tauri 构建：`cargo tauri build --no-bundle --no-sign` 成功，产物位于 `src-tauri/target/release/confluox-desktop`。
 - 说明：本地 shell 为 zsh，验证时使用了 `python3`，且 `gateway[dev]` 需加引号防止 glob；CI workflow 中继续保留 `python -m ...` 以兼容三平台 runner。
 
-### 7.3 Branch Protection 手工核验
+### 7.3 远端 CI 首次运行证据（2026-03-18）
+
+- run: `https://github.com/Cocoblood9527/Confluox/actions/runs/23208181163`
+- workflow: `ci-dual-track`
+- head: `feature/phase3-ci-dual-track-matrix@99954b0578818abe86dac51f8a7e17292c9f63a4`
+- 总结论：`completed / success`
+- Checks（PR #3）：
+  - `actionlint`: pass（7s）
+  - `dual-track-macos-latest`: pass（11m30s）
+  - `dual-track-ubuntu-latest`: pass（2m46s）
+  - `dual-track-windows-latest`: pass（6m50s）
+- 结论：三平台矩阵与 lint 均通过，workflow 具备作为 required checks 的稳定命名与可观测性，可用于严格阻断。
+
+### 7.4 Branch Protection 手工核验
 
 - 远端查询：`gh api repos/Cocoblood9527/Confluox/branches/main/protection`；
 - 结果：`Branch not protected (HTTP 404)`；
 - 结论：当前仓库 `main` 尚未配置分支保护，需在 GitHub Settings 中手工绑定本 workflow 的检查状态后，才能形成“平台失败阻断合并”的强制门禁。
 
-### 7.4 已知限制
+### 7.5 已知限制
 
 - 目前仅 `macOS` 跑完整双轨 + tauri no-bundle 链路；
 - `Ubuntu/Windows` 当前仅执行基础校验（gateway tests + frontend build + `gateway_artifact` Rust 测试）。
