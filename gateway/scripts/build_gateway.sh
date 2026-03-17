@@ -25,7 +25,7 @@ for directory in report.get("data_dirs", []):
 PY
 )
 
-pyinstaller \
+python3 -m PyInstaller \
   --noconfirm \
   --clean \
   --name confluox-gateway \

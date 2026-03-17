@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -93,7 +95,7 @@ pub fn start_gateway(app: &AppHandle) -> Result<Arc<GatewayRuntime>, String> {
         "tauri://localhost".to_string()
     };
 
-    let child = spawn_gateway_process(
+    let mut child = spawn_gateway_process(
         app,
         &data_dir,
         &auth_token,
@@ -101,8 +103,7 @@ pub fn start_gateway(app: &AppHandle) -> Result<Arc<GatewayRuntime>, String> {
         host_pid,
         &allowed_origin,
     )?;
-    let child_pid = child.id();
-    let port = wait_for_ready_port(&ready_file, child_pid, Duration::from_secs(30))?;
+    let port = wait_for_ready_port(&ready_file, &mut child, Duration::from_secs(30))?;
 
     Ok(Arc::new(GatewayRuntime {
         info: GatewayInfo {
@@ -124,7 +125,7 @@ fn spawn_gateway_process(
 ) -> Result<Child, String> {
     let mut cmd = if cfg!(debug_assertions) {
         let gateway_dir = workspace_root()?.join("gateway");
-        let mut command = Command::new("python3");
+        let mut command = Command::new(resolve_python_interpreter()?);
         command.current_dir(gateway_dir);
         command.arg("-m").arg("gateway.main");
         command
@@ -135,7 +136,7 @@ fn spawn_gateway_process(
             Command::new(gateway_bin)
         } else {
             let gateway_dir = workspace_root()?.join("gateway");
-            let mut command = Command::new("python3");
+            let mut command = Command::new(resolve_python_interpreter()?);
             command.current_dir(gateway_dir);
             command.arg("-m").arg("gateway.main");
             command
@@ -159,9 +160,13 @@ fn spawn_gateway_process(
     cmd.spawn().map_err(|err| err.to_string())
 }
 
-fn wait_for_ready_port(ready_file: &Path, child_pid: u32, timeout: Duration) -> Result<u16, String> {
+fn wait_for_ready_port(ready_file: &Path, child: &mut Child, timeout: Duration) -> Result<u16, String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("gateway exited before ready file: {status}"));
+        }
+
         if let Ok(content) = fs::read_to_string(ready_file) {
             let parsed: ReadyPayload =
                 serde_json::from_str(&content).map_err(|err| format!("invalid ready json: {err}"))?;
@@ -171,7 +176,7 @@ fn wait_for_ready_port(ready_file: &Path, child_pid: u32, timeout: Duration) -> 
                     .unwrap_or_else(|| "gateway reported startup error".to_string()));
             }
             if parsed.status == "ready" {
-                if parsed.pid == Some(child_pid) {
+                if parsed.pid == Some(child.id()) {
                     if let Some(port) = parsed.port {
                         return Ok(port);
                     }
@@ -181,6 +186,44 @@ fn wait_for_ready_port(ready_file: &Path, child_pid: u32, timeout: Duration) -> 
         thread::sleep(Duration::from_millis(200));
     }
     Err("timed out waiting for gateway ready file".to_string())
+}
+
+fn resolve_python_interpreter() -> Result<String, String> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(value) = env::var("CONFLUOX_PYTHON") {
+        candidates.push(value);
+    }
+    if let Ok(value) = env::var("PYTHON") {
+        candidates.push(value);
+    }
+    candidates.push("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3".to_string());
+    candidates.push("/opt/homebrew/bin/python3".to_string());
+    candidates.push("/usr/local/bin/python3".to_string());
+    candidates.push("python3".to_string());
+
+    let mut seen = HashSet::new();
+    for candidate in candidates {
+        if !seen.insert(candidate.clone()) {
+            continue;
+        }
+        if python_has_gateway_deps(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    Err("failed to locate Python interpreter with fastapi+uvicorn".to_string())
+}
+
+fn python_has_gateway_deps(python: &str) -> bool {
+    Command::new(python)
+        .arg("-c")
+        .arg("import fastapi, uvicorn")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn workspace_root() -> Result<PathBuf, String> {

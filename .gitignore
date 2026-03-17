@@ -4,5 +4,6 @@
 __pycache__/
 .pytest_cache/
 gateway/build/
+dist/
 src-tauri/gen/
 src-tauri/target/

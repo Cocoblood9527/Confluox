@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -14,13 +15,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from .auth import BearerAuthMiddleware
-from .config import parse_config
-from .host_liveness import is_host_alive, start_host_liveness_watch
-from .plugin_loader import PluginContext, load_api_plugins
-from .process_manager import ProcessManager
-from .resource_resolver import get_resource_path
-from .routes import create_system_router
+from gateway.auth import BearerAuthMiddleware
+from gateway.config import parse_config
+from gateway.host_liveness import is_host_alive, start_host_liveness_watch
+from gateway.plugin_loader import PluginContext, load_api_plugins
+from gateway.process_manager import ProcessManager
+from gateway.resource_resolver import get_resource_path
+from gateway.routes import create_system_router
 
 
 def bind_localhost_ephemeral_socket() -> tuple[socket.socket, int]:
@@ -142,7 +143,8 @@ def default_plugins_dir() -> Path:
 
 
 def run_gateway(argv: list[str] | None = None) -> None:
-    config = parse_config(argv or [])
+    args = list(sys.argv[1:] if argv is None else argv)
+    config = parse_config(args)
     ready_path = Path(config.ready_file)
     ready_path.unlink(missing_ok=True)
 
