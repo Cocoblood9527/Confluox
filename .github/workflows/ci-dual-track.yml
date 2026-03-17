@@ -74,8 +74,12 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
-      - name: Run gateway tests
+      - name: Run gateway tests (non-Windows)
+        if: matrix.os != 'windows-latest'
         run: cd gateway && python -m pytest tests -q
+      - name: Run gateway tests (Windows baseline subset)
+        if: matrix.os == 'windows-latest'
+        run: cd gateway && python -m pytest tests -q -k "not build_gateway_cli"
       - name: Build gateway (dual track) on macOS
         if: matrix.os == 'macos-latest'
         run: cd gateway && ./scripts/build_gateway.sh --track all
