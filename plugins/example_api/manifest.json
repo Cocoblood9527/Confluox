@@ -1,0 +1,5 @@
+{
+  "type": "api",
+  "entry": "entry:setup",
+  "name": "example_api"
+}
