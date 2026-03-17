@@ -6,6 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="build_gateway Bash CLI tests are not stable on GitHub Windows runners",
+)
+
 
 def _repo_dir() -> Path:
     return Path(__file__).resolve().parents[2]
