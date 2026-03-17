@@ -4,8 +4,14 @@ import json
 import os
 import socket
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
+
+from fastapi import FastAPI
+import uvicorn
+
+from .routes import create_system_router
 
 
 def bind_localhost_ephemeral_socket() -> tuple[socket.socket, int]:
@@ -53,3 +59,18 @@ def write_ready_file_atomic(path: str | Path, payload: Mapping[str, Any]) -> Non
 
 def is_ready_payload(payload: Mapping[str, Any]) -> bool:
     return payload.get("status") == "ready"
+
+
+def create_app(on_shutdown: Callable[[], None] | None = None) -> FastAPI:
+    app = FastAPI(title="Confluox Gateway", version="0.1.0")
+    app.include_router(create_system_router(on_shutdown=on_shutdown))
+    return app
+
+
+def create_server(app: FastAPI, *, log_level: str = "info") -> uvicorn.Server:
+    config = uvicorn.Config(app=app, log_level=log_level)
+    return uvicorn.Server(config=config)
+
+
+def run_server_with_socket(server: uvicorn.Server, sock: socket.socket) -> None:
+    server.run(sockets=[sock])
