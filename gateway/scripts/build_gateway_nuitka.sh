@@ -41,12 +41,24 @@ resolve_platform() {
 resolve_version() {
   python3 - <<'PY' "${GATEWAY_DIR}/pyproject.toml"
 from pathlib import Path
+import re
 import sys
-import tomllib
 
-with Path(sys.argv[1]).open("rb") as handle:
-    data = tomllib.load(handle)
-print(data["project"]["version"])
+content = Path(sys.argv[1]).read_text(encoding="utf-8")
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    tomllib = None
+
+if tomllib is not None:
+    data = tomllib.loads(content)
+    print(data["project"]["version"])
+    raise SystemExit(0)
+
+match = re.search(r'(?m)^version\\s*=\\s*["\\\']([^"\\\']+)["\\\']\\s*$', content)
+if not match:
+    raise SystemExit("failed to parse [project].version from pyproject.toml")
+print(match.group(1))
 PY
 }
 

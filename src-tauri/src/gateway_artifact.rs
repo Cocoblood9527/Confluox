@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 const TRACK_PRIORITY: [&str; 2] = ["nuitka", "pyinstaller"];
 
@@ -47,18 +47,58 @@ pub fn resolve_gateway_binary_from_artifacts(resource_dir: &Path) -> Result<Path
             ));
             continue;
         }
+        if !is_safe_relative_entry(&artifact.entry) {
+            failure_reasons.push(format!(
+                "{} entry '{}' escapes track directory via unsafe relative path",
+                artifact_path.display(),
+                artifact.entry
+            ));
+            continue;
+        }
 
-        let entry_path = artifact_path
+        let artifact_dir = artifact_path
             .parent()
-            .expect("artifact file path should have a parent")
-            .join(&artifact.entry);
-        if entry_path.is_file() {
-            return Ok(entry_path);
+            .expect("artifact file path should have a parent");
+        let entry_path = artifact_dir.join(&artifact.entry);
+        if !entry_path.is_file() {
+            failure_reasons.push(format!(
+                "{} points to missing entry {}",
+                artifact_path.display(),
+                entry_path.display()
+            ));
+            continue;
+        }
+
+        let artifact_dir_real = match fs::canonicalize(artifact_dir) {
+            Ok(path) => path,
+            Err(err) => {
+                failure_reasons.push(format!(
+                    "failed to canonicalize artifact dir {}: {}",
+                    artifact_dir.display(),
+                    err
+                ));
+                continue;
+            }
+        };
+        let entry_real = match fs::canonicalize(&entry_path) {
+            Ok(path) => path,
+            Err(err) => {
+                failure_reasons.push(format!(
+                    "failed to canonicalize entry {}: {}",
+                    entry_path.display(),
+                    err
+                ));
+                continue;
+            }
+        };
+        if entry_real.starts_with(&artifact_dir_real) {
+            return Ok(entry_real);
         }
         failure_reasons.push(format!(
-            "{} points to missing entry {}",
+            "{} entry {} escapes track directory {}",
             artifact_path.display(),
-            entry_path.display()
+            entry_path.display(),
+            artifact_dir.display()
         ));
     }
 
@@ -75,6 +115,19 @@ fn load_artifact(path: &Path) -> Result<GatewayArtifact, String> {
         .map_err(|err| format!("{} is unavailable: {}", path.display(), err))?;
     serde_json::from_str::<GatewayArtifact>(&content)
         .map_err(|err| format!("{} is invalid JSON: {}", path.display(), err))
+}
+
+fn is_safe_relative_entry(entry: &str) -> bool {
+    let path = Path::new(entry);
+    if path.is_absolute() {
+        return false;
+    }
+    path.components().all(|component| {
+        !matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    })
 }
 
 #[cfg(test)]
@@ -119,6 +172,31 @@ mod tests {
         assert!(err.contains("checked paths"));
         assert!(err.contains("gateway/nuitka/gateway-artifact.json"));
         assert!(err.contains("gateway/pyinstaller/gateway-artifact.json"));
+    }
+
+    #[test]
+    fn rejects_entry_that_escapes_track_directory() {
+        let resource_dir = create_temp_resource_dir("escape");
+        let track_dir = resource_dir.join("gateway").join("nuitka");
+        fs::create_dir_all(&track_dir).expect("must create track dir");
+        fs::write(resource_dir.join("outside-bin"), b"fake-binary").expect("must write outside file");
+
+        let payload = json!({
+            "track": "nuitka",
+            "platform": "darwin-arm64",
+            "entry": "../outside-bin",
+            "resources_dir": ".",
+            "version": "0.1.0",
+            "built_at": "2026-03-17T00:00:00Z",
+        });
+        fs::write(
+            track_dir.join("gateway-artifact.json"),
+            serde_json::to_vec(&payload).expect("json serialization should work"),
+        )
+        .expect("must write artifact file");
+
+        let err = resolve_gateway_binary_from_artifacts(&resource_dir).unwrap_err();
+        assert!(err.contains("escapes track directory"));
     }
 
     fn create_temp_resource_dir(label: &str) -> PathBuf {
