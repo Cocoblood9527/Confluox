@@ -4,6 +4,8 @@ import json
 import os
 import socket
 import tempfile
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
@@ -13,7 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from .auth import BearerAuthMiddleware
-from .host_liveness import start_host_liveness_watch
+from .config import parse_config
+from .host_liveness import is_host_alive, start_host_liveness_watch
+from .plugin_loader import PluginContext, load_api_plugins
+from .process_manager import ProcessManager
+from .resource_resolver import get_resource_path
 from .routes import create_system_router
 
 
@@ -129,3 +135,75 @@ async def watch_host_and_shutdown(
         on_host_exit=on_host_exit,
         poll_interval=poll_interval,
     )
+
+
+def default_plugins_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "plugins"
+
+
+def run_gateway(argv: list[str] | None = None) -> None:
+    config = parse_config(argv or [])
+    ready_path = Path(config.ready_file)
+    ready_path.unlink(missing_ok=True)
+
+    process_manager = ProcessManager()
+    server_ref: dict[str, uvicorn.Server | None] = {"server": None}
+
+    def terminate_all() -> None:
+        process_manager.terminate_all()
+
+    def on_shutdown() -> None:
+        terminate_all()
+        ready_path.unlink(missing_ok=True)
+        server = server_ref["server"]
+        if server is not None:
+            server.should_exit = True
+
+    app = create_app(
+        on_shutdown=on_shutdown,
+        auth_token=config.auth_token,
+        allowed_origin=config.allowed_origin,
+    )
+
+    plugin_context = PluginContext(
+        app=app,
+        data_dir=config.data_dir,
+        auth=config.auth_token,
+        process_manager=process_manager,
+        resource_resolver=get_resource_path,
+    )
+    load_api_plugins(default_plugins_dir(), plugin_context)
+
+    sock, port = bind_localhost_ephemeral_socket()
+    write_ready_file_atomic(ready_path, build_ready_payload(port=port))
+
+    server = create_server(app)
+    server_ref["server"] = server
+
+    host_watch_thread = threading.Thread(
+        target=_watch_host_pid,
+        kwargs={
+            "host_pid": config.host_pid,
+            "on_host_exit": on_shutdown,
+        },
+        daemon=True,
+    )
+    host_watch_thread.start()
+
+    try:
+        run_server_with_socket(server, sock)
+    finally:
+        on_shutdown()
+        sock.close()
+
+
+def _watch_host_pid(*, host_pid: int, on_host_exit: Callable[[], None]) -> None:
+    while True:
+        if not is_host_alive(host_pid):
+            on_host_exit()
+            return
+        time.sleep(1.0)
+
+
+if __name__ == "__main__":
+    run_gateway()
