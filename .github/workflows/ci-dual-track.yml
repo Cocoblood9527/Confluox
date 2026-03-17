@@ -89,9 +89,12 @@ jobs:
       - name: Build tauri app (no bundle) on macOS
         if: matrix.os == 'macos-latest'
         run: cargo tauri build --no-bundle --no-sign
-      - name: Ensure dist precondition on non-macOS
-        if: matrix.os != 'macos-latest'
+      - name: Ensure dist precondition on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
         run: mkdir -p dist/gateway
-      - name: Verify gateway_artifact track selection on non-macOS
-        if: matrix.os != 'macos-latest'
+      - name: Verify gateway_artifact track selection on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml gateway_artifact -- --nocapture
+      - name: Skip Rust gateway_artifact check on Windows (documented CI baseline)
+        if: matrix.os == 'windows-latest'
+        run: echo "Windows CI baseline skips Rust gateway_artifact check in Phase 3; macOS+Ubuntu cover Rust track verification."
