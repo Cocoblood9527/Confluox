@@ -1,6 +1,6 @@
 # Phase 2 Nuitka 双轨打包执行导向 Spec
 
-> 状态：设计已通过用户书面确认，待进入实现执行
+> 状态：实现已完成（本地验证通过，待提交）
 > 日期：2026-03-17
 > 上位文档：`docs/superpowers/specs/2026-03-17-mvp-desktop-bridge-design.md`
 > 下游文档：`docs/superpowers/plans/2026-03-17-phase2-nuitka-dual-track-plan.md`
@@ -144,3 +144,54 @@
 - 先契约后实现：先统一目录与元数据，再接入运行时选择；
 - 不破坏主链路：本轮新增不得影响现有 PyInstaller 可用性；
 - 可观察、可定位：失败信息必须直接可用于排查。
+
+## 8. 实现结果与执行证据（2026-03-17）
+
+### 8.1 已完成实现
+
+- 网关侧新增产物契约模块：`gateway/gateway/artifact_contract.py`
+- 网关侧新增契约单测：`gateway/tests/test_artifact_contract.py`
+- 构建入口拆分为双轨：
+  - `gateway/scripts/build_gateway.sh`
+  - `gateway/scripts/build_gateway_pyinstaller.sh`
+  - `gateway/scripts/build_gateway_nuitka.sh`
+- 构建策略与参数测试：`gateway/tests/test_build_gateway_cli.py`
+- Tauri 侧新增轨道选择模块：`src-tauri/src/gateway_artifact.rs`
+- 运行时切换到元数据选择：`src-tauri/src/gateway.rs`
+- 模块注册：`src-tauri/src/lib.rs`
+- 资源映射改为双轨目录：`src-tauri/tauri.conf.json`
+
+### 8.2 关键验证命令（本地实测）
+
+以下命令在本地执行通过（exit code = 0）：
+
+- `cd gateway && python3 -m pytest tests -q`
+- `cd frontend && npm run build`
+- `cargo build --manifest-path src-tauri/Cargo.toml`
+- `cd gateway && ./scripts/build_gateway.sh --track pyinstaller`
+- `cd gateway && ./scripts/build_gateway.sh --track nuitka`
+- `cd gateway && ./scripts/build_gateway.sh --track all`
+- `cargo test --manifest-path src-tauri/Cargo.toml gateway_artifact -- --nocapture`
+- `cargo tauri build --no-bundle --no-sign`
+- `cargo tauri build --no-sign`
+
+### 8.3 产物与资源核验
+
+- 本地产物元数据存在：
+  - `dist/gateway/nuitka/gateway-artifact.json`
+  - `dist/gateway/pyinstaller/gateway-artifact.json`
+- Bundle 内元数据存在：
+  - `.../Contents/Resources/gateway/nuitka/gateway-artifact.json`
+  - `.../Contents/Resources/gateway/pyinstaller/gateway-artifact.json`
+
+### 8.4 回退契约核验
+
+- `gateway_artifact` 单测已覆盖并通过：
+  - 双轨都存在时优先 `nuitka`
+  - `nuitka` 缺失时回退 `pyinstaller`
+  - 双轨不可用时返回包含 checked paths 的诊断错误
+
+### 8.5 已知说明
+
+- Nuitka 首次构建会下载/初始化 ccache，耗时显著高于后续构建。
+- 为避免将 Nuitka 中间编译目录打入资源，构建脚本已启用 `--remove-output`。
