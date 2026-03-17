@@ -25,6 +25,22 @@ for directory in report.get("data_dirs", []):
 PY
 )
 
+PLUGIN_HIDDEN_IMPORT_ARGS=()
+while IFS= read -r module_name; do
+  [[ -n "${module_name}" ]] || continue
+  PLUGIN_HIDDEN_IMPORT_ARGS+=(--hidden-import "${module_name}")
+done < <(python3 - <<'PY' "${SCAN_REPORT}"
+import json
+import sys
+
+report_path = sys.argv[1]
+with open(report_path, encoding="utf-8") as handle:
+    report = json.load(handle)
+for module_name in report.get("hidden_imports", []):
+    print(module_name)
+PY
+)
+
 python3 -m PyInstaller \
   --noconfirm \
   --clean \
@@ -33,5 +49,7 @@ python3 -m PyInstaller \
   --workpath "${GATEWAY_DIR}/build/pyinstaller" \
   --specpath "${GATEWAY_DIR}/build" \
   --paths "${GATEWAY_DIR}" \
+  --paths "${REPO_DIR}" \
+  "${PLUGIN_HIDDEN_IMPORT_ARGS[@]}" \
   "${PLUGIN_DATA_ARGS[@]}" \
   gateway/main.py

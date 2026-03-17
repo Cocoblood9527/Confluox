@@ -131,16 +131,8 @@ fn spawn_gateway_process(
         command
     } else {
         let resource_dir = app.path().resource_dir().map_err(|err| err.to_string())?;
-        let gateway_bin = resource_dir.join("gateway");
-        if gateway_bin.exists() {
-            Command::new(gateway_bin)
-        } else {
-            let gateway_dir = workspace_root()?.join("gateway");
-            let mut command = Command::new(resolve_python_interpreter()?);
-            command.current_dir(gateway_dir);
-            command.arg("-m").arg("gateway.main");
-            command
-        }
+        let gateway_bin = resolve_bundled_gateway_binary(&resource_dir)?;
+        Command::new(gateway_bin)
     };
 
     cmd.arg("--data-dir")
@@ -160,7 +152,48 @@ fn spawn_gateway_process(
     cmd.spawn().map_err(|err| err.to_string())
 }
 
-fn wait_for_ready_port(ready_file: &Path, child: &mut Child, timeout: Duration) -> Result<u16, String> {
+fn executable_name(base: &str) -> String {
+    match env::consts::EXE_SUFFIX {
+        "" => base.to_string(),
+        suffix => format!("{base}.{suffix}"),
+    }
+}
+
+fn resolve_bundled_gateway_binary(resource_dir: &Path) -> Result<PathBuf, String> {
+    let gateway_name = executable_name("gateway");
+    let legacy_name = executable_name("confluox-gateway");
+    let candidates = vec![
+        resource_dir.join(&gateway_name),
+        resource_dir.join(&legacy_name),
+        resource_dir.join("gateway").join(&gateway_name),
+        resource_dir.join("gateway").join(&legacy_name),
+        resource_dir.join("confluox-gateway").join(&legacy_name),
+        resource_dir.join("confluox-gateway").join(&gateway_name),
+    ];
+
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return Ok(candidate.to_path_buf());
+        }
+    }
+
+    let checked = candidates
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "bundled gateway executable not found in resources dir {} (checked: {}). build gateway artifact first (gateway/scripts/build_gateway.sh) and include it via tauri bundle resources",
+        resource_dir.display(),
+        checked
+    ))
+}
+
+fn wait_for_ready_port(
+    ready_file: &Path,
+    child: &mut Child,
+    timeout: Duration,
+) -> Result<u16, String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if let Ok(Some(status)) = child.try_wait() {
@@ -168,8 +201,8 @@ fn wait_for_ready_port(ready_file: &Path, child: &mut Child, timeout: Duration) 
         }
 
         if let Ok(content) = fs::read_to_string(ready_file) {
-            let parsed: ReadyPayload =
-                serde_json::from_str(&content).map_err(|err| format!("invalid ready json: {err}"))?;
+            let parsed: ReadyPayload = serde_json::from_str(&content)
+                .map_err(|err| format!("invalid ready json: {err}"))?;
             if parsed.status == "error" {
                 return Err(parsed
                     .message

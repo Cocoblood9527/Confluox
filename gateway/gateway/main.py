@@ -98,6 +98,24 @@ def create_server(app: FastAPI, *, log_level: str = "info") -> uvicorn.Server:
     return uvicorn.Server(config=config)
 
 
+def register_ready_file_startup_hook(
+    *,
+    app: FastAPI,
+    ready_file: str | Path,
+    port: int,
+    version: str = "0.1.0",
+) -> None:
+    ready_path = Path(ready_file)
+
+    async def write_ready_file_on_startup() -> None:
+        write_ready_file_atomic(
+            ready_path,
+            build_ready_payload(port=port, version=version),
+        )
+
+    app.router.on_startup.append(write_ready_file_on_startup)
+
+
 def run_server_with_socket(server: uvicorn.Server, sock: socket.socket) -> None:
     server.run(sockets=[sock])
 
@@ -177,7 +195,11 @@ def run_gateway(argv: list[str] | None = None) -> None:
     load_api_plugins(default_plugins_dir(), plugin_context)
 
     sock, port = bind_localhost_ephemeral_socket()
-    write_ready_file_atomic(ready_path, build_ready_payload(port=port))
+    register_ready_file_startup_hook(
+        app=app,
+        ready_file=ready_path,
+        port=port,
+    )
 
     server = create_server(app)
     server_ref["server"] = server

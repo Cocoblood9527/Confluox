@@ -19,6 +19,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "resources": {
+      "../dist/gateway/confluox-gateway": "gateway"
+    }
   }
 }
