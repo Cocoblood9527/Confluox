@@ -18,7 +18,11 @@ from gateway.auth import BearerAuthMiddleware
 from gateway.bootstrap import read_bootstrap_config
 from gateway.config import parse_config
 from gateway.host_liveness import start_host_liveness_watch
-from gateway.plugin_loader import PluginContext, load_api_plugins
+from gateway.plugin_loader import (
+    PluginContext,
+    activate_plugin_descriptors,
+    discover_api_plugins,
+)
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
 from gateway.routes import create_system_router
@@ -173,7 +177,8 @@ def run_gateway(argv: list[str] | None = None) -> None:
         process_manager=process_manager,
         resource_resolver=get_resource_path,
     )
-    load_api_plugins(default_plugins_dir(), plugin_context)
+    plugin_descriptors = discover_api_plugins(default_plugins_dir())
+    activate_plugin_descriptors(plugin_descriptors, plugin_context)
 
     sock, port = bind_localhost_ephemeral_socket()
     register_ready_file_startup_hook(

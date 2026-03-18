@@ -4,7 +4,7 @@ import importlib.util
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from fastapi import FastAPI
 
@@ -18,12 +18,20 @@ class PluginContext:
     resource_resolver: Callable[[str], str]
 
 
-def load_api_plugins(plugins_dir: str | Path, context: PluginContext) -> list[str]:
+@dataclass(frozen=True)
+class PluginDescriptor:
+    name: str
+    plugin_dir: Path
+    module_path: Path
+    function_name: str
+
+
+def discover_api_plugins(plugins_dir: str | Path) -> list[PluginDescriptor]:
     base_dir = Path(plugins_dir)
     if not base_dir.exists():
         return []
 
-    loaded: list[str] = []
+    descriptors: list[PluginDescriptor] = []
     for plugin_dir in sorted(base_dir.iterdir()):
         if not plugin_dir.is_dir():
             continue
@@ -37,13 +45,34 @@ def load_api_plugins(plugins_dir: str | Path, context: PluginContext) -> list[st
 
         entry = str(manifest["entry"])
         module_name, function_name = entry.split(":", maxsplit=1)
-        module_path = plugin_dir / f"{module_name}.py"
-        module = _load_module(module_path, plugin_name=str(plugin_dir.name))
-        setup = getattr(module, function_name)
-        setup(context)
-        loaded.append(str(manifest.get("name", plugin_dir.name)))
+        descriptors.append(
+            PluginDescriptor(
+                name=str(manifest.get("name", plugin_dir.name)),
+                plugin_dir=plugin_dir,
+                module_path=plugin_dir / f"{module_name}.py",
+                function_name=function_name,
+            )
+        )
 
+    return descriptors
+
+
+def activate_plugin_descriptors(
+    descriptors: Iterable[PluginDescriptor],
+    context: PluginContext,
+) -> list[str]:
+    loaded: list[str] = []
+    for descriptor in descriptors:
+        module = _load_module(descriptor.module_path, plugin_name=descriptor.plugin_dir.name)
+        setup = getattr(module, descriptor.function_name)
+        setup(context)
+        loaded.append(descriptor.name)
     return loaded
+
+
+def load_api_plugins(plugins_dir: str | Path, context: PluginContext) -> list[str]:
+    descriptors = discover_api_plugins(plugins_dir)
+    return activate_plugin_descriptors(descriptors, context)
 
 
 def _load_module(module_path: Path, plugin_name: str):
