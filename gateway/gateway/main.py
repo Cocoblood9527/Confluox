@@ -23,7 +23,11 @@ from gateway.plugin_loader import (
     activate_plugin_descriptors,
     discover_api_plugins,
 )
-from gateway.plugin_policy import ApiPluginTrustPolicy, WorkerPermissionPolicy
+from gateway.plugin_policy import (
+    ApiPluginTrustPolicy,
+    WorkerPermissionPolicy,
+    WorkerSandboxProfilePolicy,
+)
 from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
@@ -156,6 +160,12 @@ def default_worker_permission_policy() -> WorkerPermissionPolicy:
     )
 
 
+def default_worker_sandbox_profile_policy() -> WorkerSandboxProfilePolicy:
+    return WorkerSandboxProfilePolicy(
+        allowed_profiles=("restricted", "strict"),
+    )
+
+
 def default_api_trust_policy(
     *,
     plugins_dir: Path,
@@ -218,6 +228,7 @@ def run_gateway(argv: list[str] | None = None) -> None:
         worker_descriptors,
         process_manager=process_manager,
         permission_policy=default_worker_permission_policy(),
+        sandbox_profile_policy=default_worker_sandbox_profile_policy(),
     )
 
     sock, port = bind_localhost_ephemeral_socket()

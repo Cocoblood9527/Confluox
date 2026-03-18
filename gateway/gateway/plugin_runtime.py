@@ -9,7 +9,9 @@ from gateway.plugin_manifest import parse_plugin_manifest
 from gateway.plugin_policy import (
     PermissionPolicyViolation,
     WorkerPermissionPolicy,
+    WorkerSandboxProfilePolicy,
     evaluate_worker_permissions,
+    evaluate_worker_sandbox_profile,
 )
 from gateway.process_manager import ProcessManager
 
@@ -21,6 +23,7 @@ class WorkerPluginDescriptor:
     command: list[str]
     runtime: str | None
     permissions: dict[str, list[str]]
+    sandbox_profile: str | None
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,7 @@ def discover_worker_plugins(plugins_dir: str | Path) -> list[WorkerPluginDescrip
                 command=list(manifest.command),
                 runtime=manifest.runtime,
                 permissions=dict(manifest.permissions),
+                sandbox_profile=manifest.sandbox_profile,
             )
         )
     return descriptors
@@ -71,6 +75,7 @@ def start_worker_plugins(
     *,
     process_manager: ProcessManager,
     permission_policy: WorkerPermissionPolicy | None = None,
+    sandbox_profile_policy: WorkerSandboxProfilePolicy | None = None,
 ) -> list[WorkerRuntimeStatus]:
     statuses: list[WorkerRuntimeStatus] = []
     for descriptor in descriptors:
@@ -89,6 +94,33 @@ def start_worker_plugins(
                         runtime=descriptor.runtime,
                         rejected=True,
                         policy_violations=list(decision.violations),
+                    )
+                )
+                continue
+
+        if sandbox_profile_policy is not None:
+            sandbox_decision = evaluate_worker_sandbox_profile(
+                descriptor.sandbox_profile,
+                policy=sandbox_profile_policy,
+            )
+            if not sandbox_decision.allowed:
+                statuses.append(
+                    WorkerRuntimeStatus(
+                        name=descriptor.name,
+                        pid=None,
+                        running=False,
+                        command=list(descriptor.command),
+                        runtime=descriptor.runtime,
+                        rejected=True,
+                        policy_violations=[
+                            PermissionPolicyViolation(
+                                code=violation.code,
+                                namespace="sandbox_profile",
+                                entry=violation.profile,
+                                message=violation.message,
+                            )
+                            for violation in sandbox_decision.violations
+                        ],
                     )
                 )
                 continue
