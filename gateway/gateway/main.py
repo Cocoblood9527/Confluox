@@ -6,7 +6,6 @@ import socket
 import sys
 import tempfile
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
@@ -18,7 +17,7 @@ import uvicorn
 from gateway.auth import BearerAuthMiddleware
 from gateway.bootstrap import read_bootstrap_config
 from gateway.config import parse_config
-from gateway.host_liveness import is_host_alive, start_host_liveness_watch
+from gateway.host_liveness import start_host_liveness_watch
 from gateway.plugin_loader import PluginContext, load_api_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
@@ -137,26 +136,6 @@ def build_host_exit_callback(
     return on_host_exit
 
 
-async def watch_host_and_shutdown(
-    *,
-    host_pid: int,
-    server: uvicorn.Server,
-    ready_file: str | Path,
-    terminate_all: Callable[[], None],
-    poll_interval: float = 1.0,
-) -> None:
-    on_host_exit = build_host_exit_callback(
-        server=server,
-        ready_file=ready_file,
-        terminate_all=terminate_all,
-    )
-    await start_host_liveness_watch(
-        host_pid=host_pid,
-        on_host_exit=on_host_exit,
-        poll_interval=poll_interval,
-    )
-
-
 def default_plugins_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "plugins"
 
@@ -207,9 +186,9 @@ def run_gateway(argv: list[str] | None = None) -> None:
     server_ref["server"] = server
 
     host_watch_thread = threading.Thread(
-        target=_watch_host_pid,
+        target=start_host_liveness_watch,
         kwargs={
-            "host_pid": config.host_pid,
+            "stream": sys.stdin,
             "on_host_exit": on_shutdown,
         },
         daemon=True,
@@ -221,14 +200,6 @@ def run_gateway(argv: list[str] | None = None) -> None:
     finally:
         on_shutdown()
         sock.close()
-
-
-def _watch_host_pid(*, host_pid: int, on_host_exit: Callable[[], None]) -> None:
-    while True:
-        if not is_host_alive(host_pid):
-            on_host_exit()
-            return
-        time.sleep(1.0)
 
 
 if __name__ == "__main__":
