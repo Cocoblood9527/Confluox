@@ -199,6 +199,7 @@ Each implementation plan should keep using the repository's real verification co
 - `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests -q`
 - `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture`
 - `cd frontend && npm run build`
+- `cd frontend && npm run test:sse-parser` (for streaming/frontend SSE parsing changes)
 
 Additional phase-specific manual verification should be added where automated coverage is not yet practical, especially for startup failure surfaces and streaming behavior.
 

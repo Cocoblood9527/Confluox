@@ -124,11 +124,16 @@ Expected: PASS.
 Run: `cd frontend && npm run build`
 Expected: PASS.
 
-- [x] **Step 3: Perform a manual streaming smoke test**
+- [x] **Step 3: Run the frontend SSE parser smoke check**
+
+Run: `cd frontend && npm run test:sse-parser`
+Expected: PASS.
+
+- [x] **Step 4: Perform a manual streaming smoke test**
 
 Start the app, trigger the streaming demo route, and confirm the UI updates incrementally instead of waiting for the full response body.
 
-- [x] **Step 4: Record why WebSocket remains out of scope**
+- [x] **Step 5: Record why WebSocket remains out of scope**
 
 Add a short execution note or PR note stating that SSE is the default for one-way streaming and that WebSocket should only be added once a real bidirectional workflow exists.
 
