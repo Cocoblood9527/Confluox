@@ -3,6 +3,7 @@ import {
   apiGet,
   getGatewayConfig,
   getGatewayDiagnostics,
+  startSystemStreamDemo,
   type GatewayDiagnostics,
   type GatewayRuntimeConfig,
 } from './api/client'
@@ -22,6 +23,7 @@ function App() {
   const [health, setHealth] = useState<string>('loading')
   const [examplePlugin, setExamplePlugin] = useState<string>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [streamOutput, setStreamOutput] = useState<string>('')
 
   useEffect(() => {
     let active = true
@@ -65,6 +67,18 @@ function App() {
     (diagnostics !== null && !diagnostics.healthy) ||
     (health !== 'loading' && health !== 'ok')
 
+  async function handleStreamDemo() {
+    setStreamOutput('')
+    try {
+      await startSystemStreamDemo((chunk, event) => {
+        setStreamOutput((prev) => `${prev}${prev ? '\n' : ''}${event}: ${chunk}`)
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setStreamOutput((prev) => `${prev}${prev ? '\n' : ''}error: ${message}`)
+    }
+  }
+
   return (
     <>
       <section id="center">
@@ -104,6 +118,12 @@ function App() {
               ) : null}
             </div>
           ) : null}
+          <button type="button" onClick={handleStreamDemo}>
+            Start stream demo
+          </button>
+          <p>
+            Stream output: <code>{streamOutput || 'idle'}</code>
+          </p>
         </div>
       </section>
     </>

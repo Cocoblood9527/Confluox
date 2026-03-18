@@ -26,7 +26,7 @@ from gateway.plugin_loader import (
 from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
-from gateway.routes import create_system_router
+from gateway.routes import create_streaming_router, create_system_router
 
 
 def bind_localhost_ephemeral_socket() -> tuple[socket.socket, int]:
@@ -84,6 +84,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Confluox Gateway", version="0.1.0")
     app.include_router(create_system_router(on_shutdown=on_shutdown))
+    app.include_router(create_streaming_router())
     if allowed_origin is not None:
         if allowed_origin == "*":
             raise ValueError("allowed_origin cannot be wildcard '*'")
