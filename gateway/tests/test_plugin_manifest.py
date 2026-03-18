@@ -38,6 +38,19 @@ def test_parse_valid_worker_manifest_with_command() -> None:
     assert manifest.permissions == {"fs": ["read:/tmp"], "network": ["loopback"]}
 
 
+def test_permissions_entries_are_left_for_policy_enforcement() -> None:
+    manifest = parse_plugin_manifest(
+        {
+            "type": "worker",
+            "name": "worker_with_policy_entries",
+            "command": ["python3", "-m", "worker.main"],
+            "permissions": {"network": ["loopback access"]},
+        }
+    )
+
+    assert manifest.permissions == {"network": ["loopback access"]}
+
+
 def test_rejects_invalid_type() -> None:
     with pytest.raises(ValueError, match="type"):
         parse_plugin_manifest(
