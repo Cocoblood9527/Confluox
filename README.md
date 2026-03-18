@@ -66,10 +66,12 @@ Current implementation highlights:
 
 ```bash
 python -m pip install -U pip
-python -m pip install -e gateway[dev]
+python -m pip install -e 'gateway[dev]'
 cd frontend && npm ci
 cargo install tauri-cli --version "^2" --locked
 ```
+
+If you work with Git worktrees, run the editable gateway install from the current worktree. Switching worktrees can leave `confluox-gateway` pointing at an older checkout, so reinstall `gateway[dev]` after moving to a different worktree.
 
 ### Start Local Development
 

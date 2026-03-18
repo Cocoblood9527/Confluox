@@ -23,7 +23,7 @@ The desktop host starts the gateway, waits for a structured ready file, then exp
 
 ```bash
 python -m pip install -U pip
-python -m pip install -e gateway[dev]
+python -m pip install -e 'gateway[dev]'
 ```
 
 ### Frontend

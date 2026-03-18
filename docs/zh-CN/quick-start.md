@@ -23,7 +23,7 @@
 
 ```bash
 python -m pip install -U pip
-python -m pip install -e gateway[dev]
+python -m pip install -e 'gateway[dev]'
 ```
 
 ### 前端

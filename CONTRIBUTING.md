@@ -30,7 +30,7 @@ This helps keep discussions grounded in the current architecture and project sco
 
 ```bash
 python -m pip install -U pip
-python -m pip install -e gateway[dev]
+python -m pip install -e 'gateway[dev]'
 cd frontend && npm ci
 cargo install tauri-cli --version "^2" --locked
 ```

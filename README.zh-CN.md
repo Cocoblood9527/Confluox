@@ -66,10 +66,12 @@ API 插件 / 适配器 / 受管控的本地进程
 
 ```bash
 python -m pip install -U pip
-python -m pip install -e gateway[dev]
+python -m pip install -e 'gateway[dev]'
 cd frontend && npm ci
 cargo install tauri-cli --version "^2" --locked
 ```
+
+如果你在用 Git worktree，请在当前 worktree 里执行可编辑安装。切换 worktree 后，`confluox-gateway` 可能还指向旧目录，这时建议重新执行一次 `gateway[dev]` 安装。
 
 ### 启动本地开发环境
 
