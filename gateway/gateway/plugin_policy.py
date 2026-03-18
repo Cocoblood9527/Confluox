@@ -7,6 +7,7 @@ from typing import Mapping, Sequence
 
 
 _ENTRY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:/-]*$")
+_SANDBOX_PROFILE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,25 @@ class PermissionDecision:
 @dataclass(frozen=True)
 class WorkerPermissionPolicy:
     allowlist: Mapping[str, Sequence[str]]
+
+
+@dataclass(frozen=True)
+class WorkerSandboxProfilePolicy:
+    allowed_profiles: Sequence[str]
+
+
+@dataclass(frozen=True)
+class WorkerSandboxProfileViolation:
+    code: str
+    profile: str
+    message: str
+
+
+@dataclass(frozen=True)
+class WorkerSandboxProfileDecision:
+    allowed: bool
+    normalized_profile: str | None
+    violations: list[WorkerSandboxProfileViolation]
 
 
 @dataclass(frozen=True)
@@ -112,6 +132,50 @@ def evaluate_worker_permissions(
     )
 
 
+def evaluate_worker_sandbox_profile(
+    profile: str | None,
+    *,
+    policy: WorkerSandboxProfilePolicy,
+) -> WorkerSandboxProfileDecision:
+    if profile is None:
+        return WorkerSandboxProfileDecision(
+            allowed=True,
+            normalized_profile=None,
+            violations=[],
+        )
+
+    violations: list[WorkerSandboxProfileViolation] = []
+    if _SANDBOX_PROFILE_PATTERN.fullmatch(profile) is None:
+        violations.append(
+            WorkerSandboxProfileViolation(
+                code="invalid_profile_format",
+                profile=profile,
+                message="sandbox_profile must match '^[a-z][a-z0-9_]*$'",
+            )
+        )
+        return WorkerSandboxProfileDecision(
+            allowed=False,
+            normalized_profile=profile,
+            violations=violations,
+        )
+
+    allowed_profiles = _normalize_sandbox_profile_allowlist(policy.allowed_profiles)
+    if profile not in allowed_profiles:
+        violations.append(
+            WorkerSandboxProfileViolation(
+                code="profile_not_allowed",
+                profile=profile,
+                message=f"sandbox_profile '{profile}' is not in host allowlist",
+            )
+        )
+
+    return WorkerSandboxProfileDecision(
+        allowed=len(violations) == 0,
+        normalized_profile=profile,
+        violations=violations,
+    )
+
+
 def evaluate_api_plugin_trust(
     plugin_dir: str | Path,
     *,
@@ -173,3 +237,14 @@ def _is_relative_to(candidate: Path, base: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _normalize_sandbox_profile_allowlist(allowed_profiles: Sequence[str]) -> set[str]:
+    normalized: set[str] = set()
+    for profile in allowed_profiles:
+        if not isinstance(profile, str) or profile == "":
+            raise ValueError("allowed sandbox profiles must be non-empty strings")
+        if _SANDBOX_PROFILE_PATTERN.fullmatch(profile) is None:
+            raise ValueError("allowed sandbox profile values are invalid")
+        normalized.add(profile)
+    return normalized

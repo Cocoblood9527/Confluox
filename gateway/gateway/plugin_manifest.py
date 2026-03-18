@@ -15,6 +15,7 @@ class PluginManifest:
     runtime: str | None
     permissions: dict[str, list[str]]
     command: list[str] | None
+    sandbox_profile: str | None
 
 
 def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
@@ -50,6 +51,13 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
     if runtime is not None and (not isinstance(runtime, str) or runtime == ""):
         raise ValueError("runtime must be non-empty string when provided")
 
+    sandbox_profile = payload.get("sandbox_profile")
+    if sandbox_profile is not None:
+        if not isinstance(sandbox_profile, str) or sandbox_profile == "":
+            raise ValueError("sandbox_profile must be non-empty string when provided")
+        if plugin_type != "worker":
+            raise ValueError("sandbox_profile is only valid for worker plugins")
+
     permissions_raw = payload.get("permissions", {})
     if not isinstance(permissions_raw, Mapping):
         raise ValueError("permissions must be an object")
@@ -68,4 +76,5 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
         runtime=runtime,
         permissions=permissions,
         command=list(command) if isinstance(command, list) else None,
+        sandbox_profile=sandbox_profile,
     )

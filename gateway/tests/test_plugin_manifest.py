@@ -29,6 +29,7 @@ def test_parse_valid_worker_manifest_with_command() -> None:
             "command": ["python3", "-m", "worker.main"],
             "runtime": "python",
             "permissions": {"fs": ["read:/tmp"], "network": ["loopback"]},
+            "sandbox_profile": "restricted",
         }
     )
 
@@ -36,6 +37,7 @@ def test_parse_valid_worker_manifest_with_command() -> None:
     assert manifest.command == ["python3", "-m", "worker.main"]
     assert manifest.runtime == "python"
     assert manifest.permissions == {"fs": ["read:/tmp"], "network": ["loopback"]}
+    assert manifest.sandbox_profile == "restricted"
 
 
 def test_permissions_entries_are_left_for_policy_enforcement() -> None:
@@ -81,5 +83,29 @@ def test_rejects_invalid_permissions_schema() -> None:
                 "name": "bad_permissions",
                 "command": ["python3", "-m", "worker.main"],
                 "permissions": {"fs": "read:/tmp"},
+            }
+        )
+
+
+def test_rejects_non_string_sandbox_profile() -> None:
+    with pytest.raises(ValueError, match="sandbox_profile"):
+        parse_plugin_manifest(
+            {
+                "type": "worker",
+                "name": "bad_sandbox_profile",
+                "command": ["python3", "-m", "worker.main"],
+                "sandbox_profile": 123,
+            }
+        )
+
+
+def test_rejects_sandbox_profile_on_api_plugin() -> None:
+    with pytest.raises(ValueError, match="sandbox_profile"):
+        parse_plugin_manifest(
+            {
+                "type": "api",
+                "name": "bad_api_sandbox_profile",
+                "entry": "entry:setup",
+                "sandbox_profile": "restricted",
             }
         )
