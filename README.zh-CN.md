@@ -188,3 +188,7 @@ cargo tauri build
 ## 当前状态
 
 Confluox 目前仍然是早期阶段框架。现阶段最完整、最适合直接使用的是 API 插件路径；更广义的适配器和服务型接入能力还在持续演进中。
+
+## 许可证
+
+Confluox 使用 [MIT License](LICENSE)。

@@ -188,3 +188,7 @@ cargo tauri build
 ## Status
 
 Confluox is currently an early-stage framework. The API plugin path is the most complete flow in the current repository, while broader adapter and service-style integrations are still evolving.
+
+## License
+
+Confluox is available under the [MIT License](LICENSE).
