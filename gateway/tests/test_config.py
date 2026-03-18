@@ -1,64 +1,63 @@
+import io
 import pytest
 
 from gateway.config import Config, parse_config
+from gateway.bootstrap import BootstrapConfig, read_bootstrap_config
 
 
 def test_parse_config_from_cli_args() -> None:
     config = parse_config(
         [
-            "--data-dir",
-            "/tmp/data",
-            "--auth-token",
-            "secret-token",
             "--ready-file",
             "/tmp/gateway.ready.json",
             "--host-pid",
             "1234",
-            "--allowed-origin",
-            "https://app.local",
         ]
     )
 
     assert isinstance(config, Config)
-    assert config.data_dir == "/tmp/data"
-    assert config.auth_token == "secret-token"
     assert config.ready_file == "/tmp/gateway.ready.json"
     assert config.host_pid == 1234
-    assert config.allowed_origin == "https://app.local"
 
 
 def test_parse_config_from_env() -> None:
     config = parse_config(
         [],
         env={
-            "CONFLUOX_DATA_DIR": "/var/lib/confluox",
-            "CONFLUOX_AUTH_TOKEN": "env-token",
             "CONFLUOX_READY_FILE": "/var/lib/confluox/ready.json",
             "CONFLUOX_HOST_PID": "4321",
-            "CONFLUOX_ALLOWED_ORIGIN": "tauri://localhost",
         },
     )
 
-    assert config.data_dir == "/var/lib/confluox"
-    assert config.auth_token == "env-token"
     assert config.ready_file == "/var/lib/confluox/ready.json"
     assert config.host_pid == 4321
-    assert config.allowed_origin == "tauri://localhost"
 
 
-def test_rejects_wildcard_allowed_origin() -> None:
-    with pytest.raises(ValueError, match="allowed_origin"):
-        parse_config(
-            [
-                "--data-dir",
-                "/tmp/data",
-                "--auth-token",
-                "secret-token",
-                "--ready-file",
-                "/tmp/gateway.ready.json",
-                "--host-pid",
-                "1234",
-                "--allowed-origin",
-                "*",
-            ]
-        )
+def test_parse_bootstrap_from_stdin_json_line() -> None:
+    stream = io.StringIO(
+        '{"data_dir":"/tmp/data","auth_token":"secret-token","allowed_origin":"https://app.local"}\n'
+    )
+    bootstrap = read_bootstrap_config(stream)
+
+    assert isinstance(bootstrap, BootstrapConfig)
+    assert bootstrap.data_dir == "/tmp/data"
+    assert bootstrap.auth_token == "secret-token"
+    assert bootstrap.allowed_origin == "https://app.local"
+
+
+def test_bootstrap_rejects_missing_required_fields() -> None:
+    stream = io.StringIO('{"data_dir":"/tmp/data","allowed_origin":"https://app.local"}\n')
+    with pytest.raises(ValueError, match="auth_token"):
+        read_bootstrap_config(stream)
+
+
+def test_bootstrap_rejects_malformed_json() -> None:
+    stream = io.StringIO("{not-json}\n")
+    with pytest.raises(ValueError, match="invalid bootstrap json"):
+        read_bootstrap_config(stream)
+
+
+def test_bootstrap_rejects_blank_payload() -> None:
+    stream = io.StringIO("\n")
+    with pytest.raises(ValueError, match="bootstrap payload is required"):
+        read_bootstrap_config(stream)

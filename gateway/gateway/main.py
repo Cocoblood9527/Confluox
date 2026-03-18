@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from gateway.auth import BearerAuthMiddleware
+from gateway.bootstrap import read_bootstrap_config
 from gateway.config import parse_config
 from gateway.host_liveness import is_host_alive, start_host_liveness_watch
 from gateway.plugin_loader import PluginContext, load_api_plugins
@@ -163,6 +164,7 @@ def default_plugins_dir() -> Path:
 def run_gateway(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     config = parse_config(args)
+    bootstrap = read_bootstrap_config(sys.stdin)
     ready_path = Path(config.ready_file)
     ready_path.unlink(missing_ok=True)
 
@@ -181,14 +183,14 @@ def run_gateway(argv: list[str] | None = None) -> None:
 
     app = create_app(
         on_shutdown=on_shutdown,
-        auth_token=config.auth_token,
-        allowed_origin=config.allowed_origin,
+        auth_token=bootstrap.auth_token,
+        allowed_origin=bootstrap.allowed_origin,
     )
 
     plugin_context = PluginContext(
         app=app,
-        data_dir=config.data_dir,
-        auth=config.auth_token,
+        data_dir=bootstrap.data_dir,
+        auth=bootstrap.auth_token,
         process_manager=process_manager,
         resource_resolver=get_resource_path,
     )

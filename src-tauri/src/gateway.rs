@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -32,12 +32,17 @@ struct ReadyPayload {
 pub struct GatewayRuntime {
     pub info: GatewayInfo,
     child: Mutex<Option<Child>>,
+    bootstrap_stdin: Mutex<Option<ChildStdin>>,
     ready_file: PathBuf,
     diagnostics: SharedGatewayDiagnostics,
 }
 
 impl GatewayRuntime {
     pub fn shutdown(&self) -> Result<(), String> {
+        if let Ok(mut stdin_handle) = self.bootstrap_stdin.lock() {
+            let _ = stdin_handle.take();
+        }
+
         let _ = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(2))
             .build()
@@ -106,7 +111,7 @@ pub fn start_gateway(
         "tauri://localhost".to_string()
     };
 
-    let mut child = match spawn_gateway_process(
+    let spawned = match spawn_gateway_process(
         app,
         &data_dir,
         &auth_token,
@@ -115,7 +120,7 @@ pub fn start_gateway(
         &allowed_origin,
         diagnostics.clone(),
     ) {
-        Ok(child) => child,
+        Ok(spawned) => spawned,
         Err(err) => {
             with_gateway_diagnostics(&diagnostics, |capture| {
                 capture.append_startup_status(false, Some(err.clone()));
@@ -123,6 +128,10 @@ pub fn start_gateway(
             return Err(err);
         }
     };
+    let SpawnedGatewayProcess {
+        mut child,
+        bootstrap_stdin,
+    } = spawned;
     let port = match wait_for_ready_port(&ready_file, &mut child, Duration::from_secs(30)) {
         Ok(port) => port,
         Err(err) => {
@@ -143,9 +152,15 @@ pub fn start_gateway(
             auth_token,
         },
         child: Mutex::new(Some(child)),
+        bootstrap_stdin: Mutex::new(Some(bootstrap_stdin)),
         ready_file,
         diagnostics,
     }))
+}
+
+struct SpawnedGatewayProcess {
+    child: Child,
+    bootstrap_stdin: ChildStdin,
 }
 
 fn spawn_gateway_process(
@@ -156,7 +171,7 @@ fn spawn_gateway_process(
     host_pid: u32,
     allowed_origin: &str,
     diagnostics: SharedGatewayDiagnostics,
-) -> Result<Child, String> {
+) -> Result<SpawnedGatewayProcess, String> {
     let mut cmd = if cfg!(debug_assertions) {
         let gateway_dir = workspace_root()?.join("gateway");
         let mut command = Command::new(resolve_python_interpreter()?);
@@ -169,21 +184,30 @@ fn spawn_gateway_process(
         Command::new(gateway_bin)
     };
 
-    cmd.arg("--data-dir")
-        .arg(data_dir)
-        .arg("--auth-token")
-        .arg(auth_token)
-        .arg("--ready-file")
+    cmd.arg("--ready-file")
         .arg(ready_file)
         .arg("--host-pid")
         .arg(host_pid.to_string())
-        .arg("--allowed-origin")
-        .arg(allowed_origin)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|err| err.to_string())?;
+    let mut bootstrap_stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "failed to capture gateway stdin".to_string())?;
+    if let Err(err) = write_gateway_bootstrap_payload(
+        &mut bootstrap_stdin,
+        data_dir,
+        auth_token,
+        allowed_origin,
+    ) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(err);
+    }
+
     let log_file = open_gateway_runtime_log(data_dir);
 
     if let Some(stdout) = child.stdout.take() {
@@ -194,7 +218,33 @@ fn spawn_gateway_process(
         spawn_gateway_stream_reader("stderr", stderr, diagnostics, log_file);
     }
 
-    Ok(child)
+    Ok(SpawnedGatewayProcess {
+        child,
+        bootstrap_stdin,
+    })
+}
+
+#[derive(Serialize)]
+struct GatewayBootstrapPayload {
+    data_dir: String,
+    auth_token: String,
+    allowed_origin: String,
+}
+
+fn write_gateway_bootstrap_payload(
+    stdin: &mut ChildStdin,
+    data_dir: &Path,
+    auth_token: &str,
+    allowed_origin: &str,
+) -> Result<(), String> {
+    let payload = GatewayBootstrapPayload {
+        data_dir: data_dir.to_string_lossy().to_string(),
+        auth_token: auth_token.to_string(),
+        allowed_origin: allowed_origin.to_string(),
+    };
+    serde_json::to_writer(&mut *stdin, &payload).map_err(|err| err.to_string())?;
+    stdin.write_all(b"\n").map_err(|err| err.to_string())?;
+    stdin.flush().map_err(|err| err.to_string())
 }
 
 fn wait_for_ready_port(
