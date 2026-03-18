@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test:sse-parser": "node --experimental-strip-types scripts/sse-parser-smoke.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

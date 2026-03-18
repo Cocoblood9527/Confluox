@@ -1,3 +1,9 @@
+import {
+  findNextSseFrameBoundary,
+  parseSseFrame,
+  type SseChunk,
+} from './sse'
+
 export type GatewayRuntimeConfig = {
   baseUrl: string
   token: string
@@ -9,10 +15,7 @@ export type GatewayDiagnostics = {
   recentEventLines: string[]
 }
 
-export type GatewayStreamChunk = {
-  event: string
-  data: string
-}
+export type GatewayStreamChunk = SseChunk
 
 type TauriGatewayPayload = {
   baseUrl: string
@@ -101,29 +104,6 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('POST', path, body)
 }
 
-function parseSseFrame(frame: string): GatewayStreamChunk | null {
-  const normalized = frame.replace(/\r\n/g, '\n')
-  let event = 'message'
-  const dataLines: string[] = []
-
-  for (const line of normalized.split('\n')) {
-    if (line.startsWith('event:')) {
-      event = line.slice('event:'.length).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice('data:'.length).trimStart())
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null
-  }
-
-  return {
-    event,
-    data: dataLines.join('\n'),
-  }
-}
-
 export async function streamGatewaySse(
   path: string,
   onChunk: (chunk: GatewayStreamChunk) => void,
@@ -154,15 +134,15 @@ export async function streamGatewaySse(
     const { value, done } = await reader.read()
     pending += decoder.decode(value ?? new Uint8Array(), { stream: !done })
 
-    let boundary = pending.indexOf('\n\n')
-    while (boundary >= 0) {
-      const frame = pending.slice(0, boundary)
-      pending = pending.slice(boundary + 2)
+    let boundary = findNextSseFrameBoundary(pending)
+    while (boundary !== null) {
+      const frame = pending.slice(0, boundary.index)
+      pending = pending.slice(boundary.index + boundary.delimiterLength)
       const parsed = parseSseFrame(frame)
       if (parsed) {
         onChunk(parsed)
       }
-      boundary = pending.indexOf('\n\n')
+      boundary = findNextSseFrameBoundary(pending)
     }
 
     if (done) {
