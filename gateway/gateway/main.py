@@ -23,6 +23,7 @@ from gateway.plugin_loader import (
     activate_plugin_descriptors,
     discover_api_plugins,
 )
+from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
 from gateway.routes import create_system_router
@@ -179,6 +180,8 @@ def run_gateway(argv: list[str] | None = None) -> None:
     )
     plugin_descriptors = discover_api_plugins(default_plugins_dir())
     activate_plugin_descriptors(plugin_descriptors, plugin_context)
+    worker_descriptors = discover_worker_plugins(default_plugins_dir())
+    start_worker_plugins(worker_descriptors, process_manager=process_manager)
 
     sock, port = bind_localhost_ephemeral_socket()
     register_ready_file_startup_hook(

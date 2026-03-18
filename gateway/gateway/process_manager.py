@@ -3,12 +3,21 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+from dataclasses import dataclass
 from collections.abc import Sequence
+
+
+@dataclass(frozen=True)
+class WorkerProcessStatus:
+    name: str
+    pid: int | None
+    running: bool
 
 
 class ProcessManager:
     def __init__(self) -> None:
         self._processes: list[subprocess.Popen[bytes]] = []
+        self._workers: dict[str, subprocess.Popen[bytes]] = {}
 
     def spawn(self, args: Sequence[str]) -> subprocess.Popen[bytes]:
         kwargs: dict[str, object] = {}
@@ -22,7 +31,30 @@ class ProcessManager:
         return process
 
     def register(self, process: subprocess.Popen[bytes]) -> None:
-        self._processes.append(process)
+        if process not in self._processes:
+            self._processes.append(process)
+
+    def spawn_worker(self, name: str, args: Sequence[str]) -> subprocess.Popen[bytes]:
+        process = self.spawn(args)
+        self._workers[name] = process
+        return process
+
+    def register_worker(self, name: str, process: subprocess.Popen[bytes]) -> None:
+        self.register(process)
+        self._workers[name] = process
+
+    def get_worker_statuses(self) -> list[WorkerProcessStatus]:
+        statuses: list[WorkerProcessStatus] = []
+        for name in sorted(self._workers.keys()):
+            process = self._workers[name]
+            statuses.append(
+                WorkerProcessStatus(
+                    name=name,
+                    pid=process.pid,
+                    running=process.poll() is None,
+                )
+            )
+        return statuses
 
     def terminate_all(self, timeout: float = 3.0) -> None:
         for process in self._processes:
