@@ -7,3 +7,4 @@ gateway/build/
 dist/
 src-tauri/gen/
 src-tauri/target/
+docs/plan/
