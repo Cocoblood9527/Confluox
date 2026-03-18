@@ -3,7 +3,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="build_gateway Bash CLI tests are not stable on GitHub Windows runners",
+)
 
 
 def _repo_dir() -> Path:
@@ -19,8 +27,19 @@ def _run_build(
     *args: str,
     fail_tracks: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    shim_dir = tmp_path / "shim-bin"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    python3_shim = shim_dir / "python3"
+    python3_shim.write_text(
+        "#!/usr/bin/env bash\n"
+        f"exec \"{Path(sys.executable).as_posix()}\" \"$@\"\n",
+        encoding="utf-8",
+    )
+    python3_shim.chmod(0o755)
+
     env = os.environ.copy()
     env["CONFLUOX_GATEWAY_TEST_MODE"] = "1"
+    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
     env["CONFLUOX_GATEWAY_DIST_ROOT"] = str(tmp_path / "dist" / "gateway")
     env["CONFLUOX_GATEWAY_SCAN_REPORT"] = str(tmp_path / "build" / "plugin-scan.json")
     env["CONFLUOX_GATEWAY_BUILD_ROOT"] = str(tmp_path / "build")

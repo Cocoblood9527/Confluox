@@ -12,6 +12,32 @@ TEST_MODE="${CONFLUOX_GATEWAY_TEST_MODE:-0}"
 FAIL_TRACKS="${CONFLUOX_GATEWAY_FAIL_TRACKS:-}"
 ARTIFACT_PATH="${TRACK_DIR}/gateway-artifact.json"
 
+resolve_python_bin() {
+  if [[ -n "${CONFLUOX_PYTHON_BIN:-}" ]]; then
+    if "${CONFLUOX_PYTHON_BIN}" -c "import sys" >/dev/null 2>&1; then
+      echo "${CONFLUOX_PYTHON_BIN}"
+      return 0
+    fi
+    echo "CONFLUOX_PYTHON_BIN is set but unusable: ${CONFLUOX_PYTHON_BIN}" >&2
+    exit 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+    echo "python3"
+    return 0
+  fi
+
+  if command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then
+    echo "python"
+    return 0
+  fi
+
+  echo "python is required but no usable interpreter was found (tried python3, python)" >&2
+  exit 1
+}
+
+PYTHON_BIN="$(resolve_python_bin)"
+
 contains_failed_track() {
   local current_track="$1"
   local raw="${FAIL_TRACKS// /}"
@@ -39,7 +65,7 @@ resolve_platform() {
 }
 
 resolve_version() {
-  python3 - <<'PY' "${GATEWAY_DIR}/pyproject.toml"
+  "${PYTHON_BIN}" - <<'PY' "${GATEWAY_DIR}/pyproject.toml"
 from pathlib import Path
 import re
 import sys
@@ -67,7 +93,7 @@ write_artifact() {
   local resources_dir="$2"
   local built_at="${CONFLUOX_GATEWAY_BUILT_AT:-}"
   if [[ -z "${built_at}" ]]; then
-    built_at="$(python3 - <<'PY'
+    built_at="$("${PYTHON_BIN}" - <<'PY'
 from datetime import datetime, timezone
 print(datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"))
 PY
@@ -78,7 +104,7 @@ PY
   platform="$(resolve_platform)"
   version="$(resolve_version)"
 
-  python3 - <<'PY' "${ARTIFACT_PATH}" "${platform}" "${entry}" "${resources_dir}" "${version}" "${built_at}"
+  "${PYTHON_BIN}" - <<'PY' "${ARTIFACT_PATH}" "${platform}" "${entry}" "${resources_dir}" "${version}" "${built_at}"
 from pathlib import Path
 import sys
 
@@ -120,8 +146,8 @@ build_real_nuitka() {
     return 1
   fi
 
-  if ! python3 -m nuitka --version >/dev/null 2>&1; then
-    echo "nuitka is not installed. Install it with: python3 -m pip install nuitka" >&2
+  if ! "${PYTHON_BIN}" -m nuitka --version >/dev/null 2>&1; then
+    echo "nuitka is not installed. Install it with: python -m pip install nuitka" >&2
     return 1
   fi
 
@@ -133,7 +159,7 @@ build_real_nuitka() {
   while IFS= read -r plugin_dir; do
     [[ -n "${plugin_dir}" ]] || continue
     plugin_data_args+=(--include-data-dir="${plugin_dir}=plugins/$(basename "${plugin_dir}")")
-  done < <(python3 - <<'PY' "${SCAN_REPORT}"
+  done < <("${PYTHON_BIN}" - <<'PY' "${SCAN_REPORT}"
 import json
 import sys
 
@@ -148,7 +174,7 @@ PY
   while IFS= read -r module_name; do
     [[ -n "${module_name}" ]] || continue
     plugin_hidden_import_args+=(--include-module="${module_name}")
-  done < <(python3 - <<'PY' "${SCAN_REPORT}"
+  done < <("${PYTHON_BIN}" - <<'PY' "${SCAN_REPORT}"
 import json
 import sys
 
@@ -164,7 +190,7 @@ PY
     pythonpath="${pythonpath}:${PYTHONPATH}"
   fi
 
-  PYTHONPATH="${pythonpath}" python3 -m nuitka \
+  PYTHONPATH="${pythonpath}" "${PYTHON_BIN}" -m nuitka \
     --standalone \
     --assume-yes-for-downloads \
     --remove-output \
@@ -202,7 +228,7 @@ PY
 
 cd "${GATEWAY_DIR}"
 if [[ ! -f "${SCAN_REPORT}" ]]; then
-  python3 scripts/scan_plugins.py --plugins-dir "${REPO_DIR}/plugins" --out "${SCAN_REPORT}" >/dev/null
+  "${PYTHON_BIN}" scripts/scan_plugins.py --plugins-dir "${REPO_DIR}/plugins" --out "${SCAN_REPORT}" >/dev/null
 fi
 
 if [[ "${TEST_MODE}" == "1" ]]; then
