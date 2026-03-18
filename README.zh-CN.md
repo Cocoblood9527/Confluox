@@ -184,6 +184,7 @@ cargo tauri build
 - [快速开始](docs/zh-CN/quick-start.md)
 - [插件指南](docs/zh-CN/plugin-guide.md)
 - [开源项目接入指南](docs/zh-CN/integration-guide.md)
+- [架构审查报告](docs/zh-CN/architecture-review.md)
 - [参与贡献](CONTRIBUTING.zh-CN.md)
 - [English README](README.md)
 
