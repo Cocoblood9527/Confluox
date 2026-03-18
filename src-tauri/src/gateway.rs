@@ -1,8 +1,10 @@
 use crate::gateway_artifact::resolve_gateway_binary_from_artifacts;
+use crate::gateway_diagnostics::SharedGatewayDiagnostics;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -31,6 +33,7 @@ pub struct GatewayRuntime {
     pub info: GatewayInfo,
     child: Mutex<Option<Child>>,
     ready_file: PathBuf,
+    diagnostics: SharedGatewayDiagnostics,
 }
 
 impl GatewayRuntime {
@@ -71,6 +74,10 @@ impl GatewayRuntime {
             }
         }
 
+        with_gateway_diagnostics(&self.diagnostics, |diagnostics| {
+            diagnostics.append_shutdown("gateway runtime shutdown complete");
+        });
+
         let _ = fs::remove_file(&self.ready_file);
         Ok(())
     }
@@ -81,7 +88,10 @@ pub fn get_gateway_info(state: tauri::State<'_, Arc<GatewayRuntime>>) -> Gateway
     state.info.clone()
 }
 
-pub fn start_gateway(app: &AppHandle) -> Result<Arc<GatewayRuntime>, String> {
+pub fn start_gateway(
+    app: &AppHandle,
+    diagnostics: SharedGatewayDiagnostics,
+) -> Result<Arc<GatewayRuntime>, String> {
     let data_dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
     fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
 
@@ -96,15 +106,36 @@ pub fn start_gateway(app: &AppHandle) -> Result<Arc<GatewayRuntime>, String> {
         "tauri://localhost".to_string()
     };
 
-    let mut child = spawn_gateway_process(
+    let mut child = match spawn_gateway_process(
         app,
         &data_dir,
         &auth_token,
         &ready_file,
         host_pid,
         &allowed_origin,
-    )?;
-    let port = wait_for_ready_port(&ready_file, &mut child, Duration::from_secs(30))?;
+        diagnostics.clone(),
+    ) {
+        Ok(child) => child,
+        Err(err) => {
+            with_gateway_diagnostics(&diagnostics, |capture| {
+                capture.append_startup_status(false, Some(err.clone()));
+            });
+            return Err(err);
+        }
+    };
+    let port = match wait_for_ready_port(&ready_file, &mut child, Duration::from_secs(30)) {
+        Ok(port) => port,
+        Err(err) => {
+            with_gateway_diagnostics(&diagnostics, |capture| {
+                capture.append_startup_status(false, Some(err.clone()));
+            });
+            return Err(err);
+        }
+    };
+
+    with_gateway_diagnostics(&diagnostics, |capture| {
+        capture.append_startup_status(true, None);
+    });
 
     Ok(Arc::new(GatewayRuntime {
         info: GatewayInfo {
@@ -113,6 +144,7 @@ pub fn start_gateway(app: &AppHandle) -> Result<Arc<GatewayRuntime>, String> {
         },
         child: Mutex::new(Some(child)),
         ready_file,
+        diagnostics,
     }))
 }
 
@@ -123,6 +155,7 @@ fn spawn_gateway_process(
     ready_file: &Path,
     host_pid: u32,
     allowed_origin: &str,
+    diagnostics: SharedGatewayDiagnostics,
 ) -> Result<Child, String> {
     let mut cmd = if cfg!(debug_assertions) {
         let gateway_dir = workspace_root()?.join("gateway");
@@ -147,10 +180,21 @@ fn spawn_gateway_process(
         .arg("--allowed-origin")
         .arg(allowed_origin)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    cmd.spawn().map_err(|err| err.to_string())
+    let mut child = cmd.spawn().map_err(|err| err.to_string())?;
+    let log_file = open_gateway_runtime_log(data_dir);
+
+    if let Some(stdout) = child.stdout.take() {
+        spawn_gateway_stream_reader("stdout", stdout, diagnostics.clone(), log_file.clone());
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        spawn_gateway_stream_reader("stderr", stderr, diagnostics, log_file);
+    }
+
+    Ok(child)
 }
 
 fn wait_for_ready_port(
@@ -183,6 +227,75 @@ fn wait_for_ready_port(
         thread::sleep(Duration::from_millis(200));
     }
     Err("timed out waiting for gateway ready file".to_string())
+}
+
+type SharedLogFile = Arc<Mutex<fs::File>>;
+
+fn open_gateway_runtime_log(data_dir: &Path) -> Option<SharedLogFile> {
+    let log_path = data_dir.join("gateway.runtime.log");
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .ok()
+        .map(|file| Arc::new(Mutex::new(file)))
+}
+
+fn spawn_gateway_stream_reader(
+    stream_name: &'static str,
+    stream: impl std::io::Read + Send + 'static,
+    diagnostics: SharedGatewayDiagnostics,
+    log_file: Option<SharedLogFile>,
+) {
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let message = line.trim_end_matches(['\r', '\n']).to_string();
+                    if stream_name == "stdout" {
+                        with_gateway_diagnostics(&diagnostics, |capture| {
+                            capture.append_stdout(message.clone());
+                        });
+                    } else {
+                        with_gateway_diagnostics(&diagnostics, |capture| {
+                            capture.append_stderr(message.clone());
+                        });
+                    }
+                    write_runtime_log(&log_file, stream_name, &message);
+                }
+                Err(err) => {
+                    let message = format!("failed to read gateway {stream_name}: {err}");
+                    with_gateway_diagnostics(&diagnostics, |capture| {
+                        capture.append_stderr(message.clone());
+                    });
+                    write_runtime_log(&log_file, "reader-error", &message);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn write_runtime_log(log_file: &Option<SharedLogFile>, stream_name: &str, message: &str) {
+    let Some(log_file) = log_file else {
+        return;
+    };
+    if let Ok(mut file) = log_file.lock() {
+        let _ = writeln!(file, "[gateway:{stream_name}] {message}");
+    }
+}
+
+fn with_gateway_diagnostics(
+    diagnostics: &SharedGatewayDiagnostics,
+    operation: impl FnOnce(&mut crate::gateway_diagnostics::GatewayDiagnostics),
+) {
+    if let Ok(mut capture) = diagnostics.lock() {
+        operation(&mut capture);
+    }
 }
 
 fn resolve_python_interpreter() -> Result<String, String> {
