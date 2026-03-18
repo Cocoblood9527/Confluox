@@ -2,9 +2,15 @@
 
 ## 当前可用的插件模型
 
-当前仓库里最完整、最成熟的是 API 插件模型。
+当前仓库支持两种插件类型：
 
-网关会扫描 `plugins/` 目录，读取每个 `manifest.json`，并加载其中 `type` 为 `api` 的插件。
+- `type: "api"`：在网关进程内注册 FastAPI 路由（兼容现有插件，保持可用）
+- `type: "worker"`：通过 `process_manager` 启动并登记受管后台进程
+
+兼容性说明：
+
+- 现有 `api` 插件无需修改即可继续工作。
+- `worker` 当前只覆盖“受管进程启动/登记/关闭”，不等于已经提供进程沙箱隔离。
 
 ## 插件目录结构
 
@@ -27,11 +33,38 @@ plugins/
 }
 ```
 
-当前 loader 实际使用的字段有：
+`api` 插件最常用字段：
 
-- `type`：必须是 `api`
+- `type`：`api`
 - `entry`：格式为 `module:function`
 - `name`：插件显示名称
+
+`worker` 插件最小示例：
+
+```json
+{
+  "type": "worker",
+  "name": "example_worker",
+  "runtime": "python",
+  "permissions": {
+    "fs": ["read:/tmp"],
+    "network": ["loopback"]
+  },
+  "command": ["python3", "-m", "worker.main"]
+}
+```
+
+`worker` 字段说明：
+
+- `type`：`worker`
+- `runtime`：运行时标签（文档/元数据用途）
+- `permissions`：声明式权限元数据（为后续 enforcement 预留）
+- `command`：由网关通过 `process_manager` 启动的命令数组
+
+注意：
+
+- 当前阶段的 `permissions` 是声明信息，不是完整的沙箱策略执行器。
+- `worker` 不会自动暴露 API 路由；它是后台受管进程模型。
 
 ## 入口函数
 
@@ -70,6 +103,7 @@ def setup(context) -> None:
 - 插件数据写到 `context.data_dir`
 - 打包资源通过框架提供的解析器定位
 - 把插件当成本地后端能力，而不是第二个应用宿主
+- `worker` 进程应可被优雅终止，避免依赖不可控的守护行为
 
 ## 前端怎么调用
 

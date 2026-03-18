@@ -2,9 +2,15 @@
 
 ## Current Plugin Model
 
-The most complete plugin path in the current repository is the API plugin model.
+The repository now supports two plugin types:
 
-The gateway scans the `plugins/` directory, reads each `manifest.json`, and loads plugins whose manifest `type` is `api`.
+- `type: "api"`: in-process FastAPI route registration (existing plugins remain compatible)
+- `type: "worker"`: managed background process startup/registration via `process_manager`
+
+Compatibility notes:
+
+- Existing `api` plugins continue to work without migration changes.
+- `worker` currently means managed process start/track/stop only; it does **not** mean process sandbox isolation is already implemented.
 
 ## Plugin Folder Layout
 
@@ -27,11 +33,38 @@ Minimal example:
 }
 ```
 
-Fields currently used by the loader:
+Common fields for `api` plugins:
 
-- `type`: must be `api`
+- `type`: `api`
 - `entry`: module and function in `module:function` format
 - `name`: display name for the plugin
+
+Minimal `worker` manifest example:
+
+```json
+{
+  "type": "worker",
+  "name": "example_worker",
+  "runtime": "python",
+  "permissions": {
+    "fs": ["read:/tmp"],
+    "network": ["loopback"]
+  },
+  "command": ["python3", "-m", "worker.main"]
+}
+```
+
+`worker` field notes:
+
+- `type`: `worker`
+- `runtime`: runtime label used as metadata
+- `permissions`: declarative permission metadata for future enforcement work
+- `command`: argv array started by the gateway through `process_manager`
+
+Important:
+
+- `permissions` is currently declarative metadata, not a full sandbox policy engine.
+- `worker` plugins do not automatically expose HTTP routes.
 
 ## Entry Function
 
@@ -70,6 +103,7 @@ The plugin context includes:
 - write plugin data under `context.data_dir`
 - use the framework-provided resource resolver for packaged assets
 - treat the plugin as a local backend surface, not a second application host
+- ensure `worker` processes can terminate cleanly on gateway shutdown
 
 ## Frontend Access
 
