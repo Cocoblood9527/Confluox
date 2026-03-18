@@ -8,6 +8,10 @@ from typing import Any, Callable, Iterable
 
 from fastapi import FastAPI
 from gateway.plugin_manifest import parse_plugin_manifest
+from gateway.plugin_policy import (
+    ApiPluginTrustPolicy,
+    evaluate_api_plugin_trust,
+)
 
 
 @dataclass
@@ -25,12 +29,19 @@ class PluginDescriptor:
     plugin_dir: Path
     module_path: Path
     function_name: str
+    trusted: bool
+    trust_source: str
 
 
-def discover_api_plugins(plugins_dir: str | Path) -> list[PluginDescriptor]:
+def discover_api_plugins(
+    plugins_dir: str | Path,
+    *,
+    trust_policy: ApiPluginTrustPolicy | None = None,
+) -> list[PluginDescriptor]:
     base_dir = Path(plugins_dir)
     if not base_dir.exists():
         return []
+    policy = trust_policy or ApiPluginTrustPolicy(trusted_roots=(base_dir,))
 
     descriptors: list[PluginDescriptor] = []
     for plugin_dir in sorted(base_dir.iterdir()):
@@ -49,12 +60,23 @@ def discover_api_plugins(plugins_dir: str | Path) -> list[PluginDescriptor]:
             raise ValueError("entry must be '<module>:<function>'")
         entry = manifest.entry
         module_name, function_name = entry.split(":", maxsplit=1)
+        plugin_name = manifest.name or plugin_dir.name
+        trust_decision = evaluate_api_plugin_trust(
+            plugin_dir,
+            plugin_name=plugin_name,
+            policy=policy,
+        )
+        if not trust_decision.trusted:
+            raise ValueError(f"untrusted api plugin: {plugin_name}")
+
         descriptors.append(
             PluginDescriptor(
-                name=manifest.name or plugin_dir.name,
+                name=plugin_name,
                 plugin_dir=plugin_dir,
                 module_path=plugin_dir / f"{module_name}.py",
                 function_name=function_name,
+                trusted=trust_decision.trusted,
+                trust_source=trust_decision.trust_source,
             )
         )
 
@@ -67,6 +89,8 @@ def activate_plugin_descriptors(
 ) -> list[str]:
     loaded: list[str] = []
     for descriptor in descriptors:
+        if not descriptor.trusted:
+            raise ValueError(f"untrusted api plugin: {descriptor.name}")
         module = _load_module(descriptor.module_path, plugin_name=descriptor.plugin_dir.name)
         setup = getattr(module, descriptor.function_name)
         setup(context)

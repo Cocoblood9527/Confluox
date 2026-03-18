@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Sequence
 
 
@@ -26,6 +27,19 @@ class PermissionDecision:
 @dataclass(frozen=True)
 class WorkerPermissionPolicy:
     allowlist: Mapping[str, Sequence[str]]
+
+
+@dataclass(frozen=True)
+class ApiPluginTrustPolicy:
+    trusted_roots: Sequence[Path]
+    trusted_plugins: Sequence[str] = ()
+
+
+@dataclass(frozen=True)
+class ApiPluginTrustDecision:
+    trusted: bool
+    trust_source: str
+    reason: str | None
 
 
 def normalize_permission_declarations(
@@ -98,6 +112,36 @@ def evaluate_worker_permissions(
     )
 
 
+def evaluate_api_plugin_trust(
+    plugin_dir: str | Path,
+    *,
+    plugin_name: str,
+    policy: ApiPluginTrustPolicy,
+) -> ApiPluginTrustDecision:
+    candidate_dir = Path(plugin_dir).resolve()
+    for trusted_root in policy.trusted_roots:
+        root = Path(trusted_root).resolve()
+        if _is_relative_to(candidate_dir, root):
+            return ApiPluginTrustDecision(
+                trusted=True,
+                trust_source="trusted_root",
+                reason=None,
+            )
+
+    if plugin_name in set(policy.trusted_plugins):
+        return ApiPluginTrustDecision(
+            trusted=True,
+            trust_source="explicit_plugin_allowlist",
+            reason=None,
+        )
+
+    return ApiPluginTrustDecision(
+        trusted=False,
+        trust_source="untrusted",
+        reason=f"plugin '{plugin_name}' is outside trusted roots and not allowlisted",
+    )
+
+
 def _normalize_permission_map(
     raw: Mapping[str, Sequence[str]],
     *,
@@ -121,3 +165,11 @@ def _normalize_permission_map(
                 entries.append(entry)
         normalized[namespace] = entries
     return normalized
+
+
+def _is_relative_to(candidate: Path, base: Path) -> bool:
+    try:
+        candidate.relative_to(base)
+        return True
+    except ValueError:
+        return False

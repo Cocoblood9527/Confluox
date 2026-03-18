@@ -8,7 +8,7 @@ import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +23,7 @@ from gateway.plugin_loader import (
     activate_plugin_descriptors,
     discover_api_plugins,
 )
-from gateway.plugin_policy import WorkerPermissionPolicy
+from gateway.plugin_policy import ApiPluginTrustPolicy, WorkerPermissionPolicy
 from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
@@ -156,6 +156,20 @@ def default_worker_permission_policy() -> WorkerPermissionPolicy:
     )
 
 
+def default_api_trust_policy(
+    *,
+    plugins_dir: Path,
+    trusted_roots: Sequence[str] = (),
+    trusted_plugins: Sequence[str] = (),
+) -> ApiPluginTrustPolicy:
+    roots = [plugins_dir]
+    roots.extend(Path(root) for root in trusted_roots)
+    return ApiPluginTrustPolicy(
+        trusted_roots=tuple(roots),
+        trusted_plugins=tuple(trusted_plugins),
+    )
+
+
 def run_gateway(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     config = parse_config(args)
@@ -189,9 +203,17 @@ def run_gateway(argv: list[str] | None = None) -> None:
         process_manager=process_manager,
         resource_resolver=get_resource_path,
     )
-    plugin_descriptors = discover_api_plugins(default_plugins_dir())
+    plugins_dir = default_plugins_dir()
+    plugin_descriptors = discover_api_plugins(
+        plugins_dir,
+        trust_policy=default_api_trust_policy(
+            plugins_dir=plugins_dir,
+            trusted_roots=config.trusted_api_plugin_roots,
+            trusted_plugins=config.trusted_api_plugins,
+        ),
+    )
     activate_plugin_descriptors(plugin_descriptors, plugin_context)
-    worker_descriptors = discover_worker_plugins(default_plugins_dir())
+    worker_descriptors = discover_worker_plugins(plugins_dir)
     start_worker_plugins(
         worker_descriptors,
         process_manager=process_manager,

@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.main import create_app
+from gateway.plugin_policy import ApiPluginTrustPolicy
 from gateway.plugin_loader import (
     PluginContext,
     activate_plugin_descriptors,
@@ -162,3 +163,72 @@ def test_discovery_rejects_invalid_manifest_schema(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="permissions"):
         discover_api_plugins(plugins_dir)
+
+
+def test_discovery_trusts_api_plugin_under_trusted_root(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "trusted_api"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps({"type": "api", "entry": "entry:setup", "name": "trusted_api"}),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        trust_policy=ApiPluginTrustPolicy(trusted_roots=(plugins_dir,)),
+    )
+
+    assert [descriptor.name for descriptor in descriptors] == ["trusted_api"]
+    assert descriptors[0].trusted is True
+    assert descriptors[0].trust_source == "trusted_root"
+
+
+def test_discovery_blocks_untrusted_api_plugin_by_default(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "untrusted_api"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps({"type": "api", "entry": "entry:setup", "name": "untrusted_api"}),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="untrusted api plugin"):
+        discover_api_plugins(
+            plugins_dir,
+            trust_policy=ApiPluginTrustPolicy(trusted_roots=(tmp_path / "trusted",)),
+        )
+
+
+def test_discovery_allows_untrusted_plugin_when_explicitly_trusted(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "allowlisted_api"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps({"type": "api", "entry": "entry:setup", "name": "allowlisted_api"}),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        trust_policy=ApiPluginTrustPolicy(
+            trusted_roots=(tmp_path / "trusted",),
+            trusted_plugins=("allowlisted_api",),
+        ),
+    )
+
+    assert [descriptor.name for descriptor in descriptors] == ["allowlisted_api"]
+    assert descriptors[0].trusted is True
+    assert descriptors[0].trust_source == "explicit_plugin_allowlist"

@@ -10,6 +10,8 @@ from typing import Mapping, Sequence
 class Config:
     ready_file: str
     host_pid: int
+    trusted_api_plugin_roots: tuple[str, ...]
+    trusted_api_plugins: tuple[str, ...]
 
 
 def parse_config(
@@ -21,12 +23,32 @@ def parse_config(
     parser = argparse.ArgumentParser(prog="confluox-gateway")
     parser.add_argument("--ready-file", default=source_env.get("CONFLUOX_READY_FILE"))
     parser.add_argument("--host-pid", type=int, default=source_env.get("CONFLUOX_HOST_PID"))
+    parser.add_argument(
+        "--trusted-api-plugin-root",
+        action="append",
+        dest="trusted_api_plugin_roots",
+        default=None,
+    )
+    parser.add_argument(
+        "--trusted-api-plugin",
+        action="append",
+        dest="trusted_api_plugins",
+        default=None,
+    )
 
     parsed = parser.parse_args(list(args or []))
 
     config = Config(
         ready_file=_require(parsed.ready_file, "ready_file"),
         host_pid=_require_int(parsed.host_pid, "host_pid"),
+        trusted_api_plugin_roots=tuple(
+            _split_csv(source_env.get("CONFLUOX_TRUSTED_API_PLUGIN_ROOTS"))
+            + list(parsed.trusted_api_plugin_roots or [])
+        ),
+        trusted_api_plugins=tuple(
+            _split_csv(source_env.get("CONFLUOX_TRUSTED_API_PLUGINS"))
+            + list(parsed.trusted_api_plugins or [])
+        ),
     )
     return config
 
@@ -41,3 +63,9 @@ def _require_int(value: int | None, name: str) -> int:
     if value is None:
         raise ValueError(f"{name} is required")
     return value
+
+
+def _split_csv(raw: str | None) -> list[str]:
+    if raw is None or raw.strip() == "":
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip() != ""]
