@@ -23,6 +23,7 @@ from gateway.plugin_loader import (
     activate_plugin_descriptors,
     discover_api_plugins,
 )
+from gateway.plugin_policy import WorkerPermissionPolicy
 from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
@@ -146,6 +147,15 @@ def default_plugins_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "plugins"
 
 
+def default_worker_permission_policy() -> WorkerPermissionPolicy:
+    return WorkerPermissionPolicy(
+        allowlist={
+            "network": ["loopback"],
+            "fs": ["read:/tmp"],
+        }
+    )
+
+
 def run_gateway(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     config = parse_config(args)
@@ -182,7 +192,11 @@ def run_gateway(argv: list[str] | None = None) -> None:
     plugin_descriptors = discover_api_plugins(default_plugins_dir())
     activate_plugin_descriptors(plugin_descriptors, plugin_context)
     worker_descriptors = discover_worker_plugins(default_plugins_dir())
-    start_worker_plugins(worker_descriptors, process_manager=process_manager)
+    start_worker_plugins(
+        worker_descriptors,
+        process_manager=process_manager,
+        permission_policy=default_worker_permission_policy(),
+    )
 
     sock, port = bind_localhost_ephemeral_socket()
     register_ready_file_startup_hook(

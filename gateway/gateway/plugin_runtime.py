@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from gateway.plugin_manifest import parse_plugin_manifest
+from gateway.plugin_policy import (
+    PermissionPolicyViolation,
+    WorkerPermissionPolicy,
+    evaluate_worker_permissions,
+)
 from gateway.process_manager import ProcessManager
 
 
@@ -25,6 +30,8 @@ class WorkerRuntimeStatus:
     running: bool
     command: list[str]
     runtime: str | None
+    rejected: bool
+    policy_violations: list[PermissionPolicyViolation]
 
 
 def discover_worker_plugins(plugins_dir: str | Path) -> list[WorkerPluginDescriptor]:
@@ -63,9 +70,29 @@ def start_worker_plugins(
     descriptors: list[WorkerPluginDescriptor],
     *,
     process_manager: ProcessManager,
+    permission_policy: WorkerPermissionPolicy | None = None,
 ) -> list[WorkerRuntimeStatus]:
     statuses: list[WorkerRuntimeStatus] = []
     for descriptor in descriptors:
+        if permission_policy is not None:
+            decision = evaluate_worker_permissions(
+                descriptor.permissions,
+                policy=permission_policy,
+            )
+            if not decision.allowed:
+                statuses.append(
+                    WorkerRuntimeStatus(
+                        name=descriptor.name,
+                        pid=None,
+                        running=False,
+                        command=list(descriptor.command),
+                        runtime=descriptor.runtime,
+                        rejected=True,
+                        policy_violations=list(decision.violations),
+                    )
+                )
+                continue
+
         process = process_manager.spawn_worker(descriptor.name, descriptor.command)
         statuses.append(
             WorkerRuntimeStatus(
@@ -74,6 +101,8 @@ def start_worker_plugins(
                 running=process.poll() is None,
                 command=list(descriptor.command),
                 runtime=descriptor.runtime,
+                rejected=False,
+                policy_violations=[],
             )
         )
     return statuses
