@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.main import create_app
@@ -112,7 +113,14 @@ def test_discovery_ignores_non_api_plugins(tmp_path) -> None:
 
     worker_marker = tmp_path / "worker-imported.marker"
     (worker_dir / "manifest.json").write_text(
-        json.dumps({"type": "worker", "entry": "entry:setup", "name": "worker_plugin"}),
+        json.dumps(
+            {
+                "type": "worker",
+                "entry": "entry:setup",
+                "name": "worker_plugin",
+                "command": ["python3", "-m", "worker.main"],
+            }
+        ),
         encoding="utf-8",
     )
     (worker_dir / "entry.py").write_text(
@@ -130,3 +138,27 @@ def test_discovery_ignores_non_api_plugins(tmp_path) -> None:
 
     assert [descriptor.name for descriptor in descriptors] == ["api_plugin"]
     assert worker_marker.exists() is False
+
+
+def test_discovery_rejects_invalid_manifest_schema(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    bad_dir = plugins_dir / "bad_manifest"
+    bad_dir.mkdir(parents=True, exist_ok=True)
+    (bad_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "name": "bad_manifest",
+                "entry": "entry:setup",
+                "permissions": {"fs": "read:/tmp"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (bad_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="permissions"):
+        discover_api_plugins(plugins_dir)

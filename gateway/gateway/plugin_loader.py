@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from fastapi import FastAPI
+from gateway.plugin_manifest import parse_plugin_manifest
 
 
 @dataclass
@@ -39,15 +40,18 @@ def discover_api_plugins(plugins_dir: str | Path) -> list[PluginDescriptor]:
         if not manifest_path.exists():
             continue
 
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("type") != "api":
+        manifest_raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = parse_plugin_manifest(manifest_raw)
+        if manifest.type != "api":
             continue
 
-        entry = str(manifest["entry"])
+        if manifest.entry is None:
+            raise ValueError("entry must be '<module>:<function>'")
+        entry = manifest.entry
         module_name, function_name = entry.split(":", maxsplit=1)
         descriptors.append(
             PluginDescriptor(
-                name=str(manifest.get("name", plugin_dir.name)),
+                name=manifest.name or plugin_dir.name,
                 plugin_dir=plugin_dir,
                 module_path=plugin_dir / f"{module_name}.py",
                 function_name=function_name,
