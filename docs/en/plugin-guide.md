@@ -11,6 +11,7 @@ Compatibility notes:
 
 - Existing `api` plugins continue to work without migration changes.
 - `worker` currently means managed process start/track/stop only; it does **not** mean process sandbox isolation is already implemented.
+- `api` plugin loading now includes a trust gate: untrusted plugin sources are blocked by default unless explicitly trusted.
 
 ## Plugin Folder Layout
 
@@ -58,13 +59,27 @@ Minimal `worker` manifest example:
 
 - `type`: `worker`
 - `runtime`: runtime label used as metadata
-- `permissions`: declarative permission metadata for future enforcement work
+- `permissions`: enforced startup policy declarations for worker launch
 - `command`: argv array started by the gateway through `process_manager`
 
 Important:
 
-- `permissions` is currently declarative metadata, not a full sandbox policy engine.
+- `permissions` is enforced at startup: policy violations reject worker launch before process spawn.
+- enforcement is allowlist-based and is not a full OS sandbox policy engine.
 - `worker` plugins do not automatically expose HTTP routes.
+
+## API Trust Policy
+
+`api` plugins are trust-gated during discovery:
+
+- plugins under the repository `plugins/` root are trusted by default
+- plugins outside trusted roots are treated as untrusted and rejected by default
+- untrusted plugins can be enabled only through explicit startup trust config
+
+Startup trust configuration:
+
+- `--trusted-api-plugin-root` / `CONFLUOX_TRUSTED_API_PLUGIN_ROOTS`: add extra trusted roots
+- `--trusted-api-plugin` / `CONFLUOX_TRUSTED_API_PLUGINS`: trust specific plugin names from otherwise untrusted sources
 
 ## Entry Function
 

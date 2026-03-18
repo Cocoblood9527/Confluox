@@ -11,6 +11,7 @@
 
 - 现有 `api` 插件无需修改即可继续工作。
 - `worker` 当前只覆盖“受管进程启动/登记/关闭”，不等于已经提供进程沙箱隔离。
+- `api` 插件加载现在带有信任策略：不受信任来源默认会被拒绝，除非显式信任。
 
 ## 插件目录结构
 
@@ -58,13 +59,27 @@ plugins/
 
 - `type`：`worker`
 - `runtime`：运行时标签（文档/元数据用途）
-- `permissions`：声明式权限元数据（为后续 enforcement 预留）
+- `permissions`：worker 启动前会强制执行的权限声明
 - `command`：由网关通过 `process_manager` 启动的命令数组
 
 注意：
 
-- 当前阶段的 `permissions` 是声明信息，不是完整的沙箱策略执行器。
+- `permissions` 现在会在启动前执行校验，违反策略会拒绝启动 worker 进程。
+- 当前 enforcement 是 allowlist 启动门禁，不是完整的操作系统级沙箱。
 - `worker` 不会自动暴露 API 路由；它是后台受管进程模型。
+
+## API 信任策略
+
+`api` 插件在发现阶段会执行信任检查：
+
+- 仓库 `plugins/` 根目录下的插件默认信任
+- 不在受信任根路径内的插件视为不受信任，默认拒绝
+- 对不受信任来源，只能通过显式信任配置放行
+
+启动时信任配置：
+
+- `--trusted-api-plugin-root` / `CONFLUOX_TRUSTED_API_PLUGIN_ROOTS`：新增受信任根路径
+- `--trusted-api-plugin` / `CONFLUOX_TRUSTED_API_PLUGINS`：按插件名显式信任（用于不受信任来源）
 
 ## 入口函数
 
