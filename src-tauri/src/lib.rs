@@ -19,7 +19,10 @@ pub fn run() {
             app.manage(gateway_runtime);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![gateway::get_gateway_info])
+        .invoke_handler(tauri::generate_handler![
+            gateway::get_gateway_info,
+            gateway_diagnostics::get_gateway_diagnostics
+        ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();

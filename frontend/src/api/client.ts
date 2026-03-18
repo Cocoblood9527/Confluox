@@ -3,9 +3,21 @@ export type GatewayRuntimeConfig = {
   token: string
 }
 
+export type GatewayDiagnostics = {
+  healthy: boolean
+  startupErrorSummary: string | null
+  recentEventLines: string[]
+}
+
 type TauriGatewayPayload = {
   baseUrl: string
   authToken: string
+}
+
+type TauriGatewayDiagnosticsPayload = {
+  healthy: boolean
+  startupErrorSummary: string | null
+  recentEventLines: string[]
 }
 
 declare global {
@@ -64,6 +76,16 @@ async function request<T>(
 
 export async function getGatewayConfig(): Promise<GatewayRuntimeConfig> {
   return resolveGatewayConfig()
+}
+
+export async function getGatewayDiagnostics(): Promise<GatewayDiagnostics> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const payload = await invoke<TauriGatewayDiagnosticsPayload>('get_gateway_diagnostics')
+  return {
+    healthy: payload.healthy,
+    startupErrorSummary: payload.startupErrorSummary,
+    recentEventLines: payload.recentEventLines,
+  }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

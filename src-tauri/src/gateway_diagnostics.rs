@@ -26,6 +26,14 @@ pub struct GatewayDiagnosticsSnapshot {
     pub events: Vec<GatewayDiagnosticEvent>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayDiagnosticsResponse {
+    pub healthy: bool,
+    pub startup_error_summary: Option<String>,
+    pub recent_event_lines: Vec<String>,
+}
+
 pub struct GatewayDiagnostics {
     max_lines: usize,
     max_bytes: usize,
@@ -127,6 +135,37 @@ pub fn snapshot_from_shared(state: &SharedGatewayDiagnostics) -> GatewayDiagnost
             startup_error_summary: Some("gateway diagnostics lock poisoned".to_string()),
             events: Vec::new(),
         },
+    }
+}
+
+#[tauri::command]
+pub fn get_gateway_diagnostics(
+    state: tauri::State<'_, SharedGatewayDiagnostics>,
+) -> GatewayDiagnosticsResponse {
+    let snapshot = snapshot_from_shared(&state);
+    GatewayDiagnosticsResponse {
+        healthy: snapshot.healthy,
+        startup_error_summary: snapshot.startup_error_summary,
+        recent_event_lines: snapshot
+            .events
+            .into_iter()
+            .map(|event| {
+                format!(
+                    "[{}] {}",
+                    event_kind_name(&event.kind),
+                    event.message
+                )
+            })
+            .collect(),
+    }
+}
+
+fn event_kind_name(kind: &GatewayDiagnosticEventKind) -> &'static str {
+    match kind {
+        GatewayDiagnosticEventKind::Stdout => "stdout",
+        GatewayDiagnosticEventKind::Stderr => "stderr",
+        GatewayDiagnosticEventKind::StartupStatus => "startup",
+        GatewayDiagnosticEventKind::Shutdown => "shutdown",
     }
 }
 

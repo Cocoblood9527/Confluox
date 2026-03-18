@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { apiGet, getGatewayConfig, type GatewayRuntimeConfig } from './api/client'
+import {
+  apiGet,
+  getGatewayConfig,
+  getGatewayDiagnostics,
+  type GatewayDiagnostics,
+  type GatewayRuntimeConfig,
+} from './api/client'
 import './App.css'
 
 type SystemHealth = {
@@ -12,6 +18,7 @@ type ExampleResponse = {
 
 function App() {
   const [gatewayConfig, setGatewayConfig] = useState<GatewayRuntimeConfig | null>(null)
+  const [diagnostics, setDiagnostics] = useState<GatewayDiagnostics | null>(null)
   const [health, setHealth] = useState<string>('loading')
   const [examplePlugin, setExamplePlugin] = useState<string>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -22,6 +29,7 @@ function App() {
     async function loadStatus() {
       try {
         const config = await getGatewayConfig()
+        const diagnosticsResult = await getGatewayDiagnostics()
         const healthResult = await apiGet<SystemHealth>('/api/system/health')
         const exampleResult = await apiGet<ExampleResponse>('/api/example')
 
@@ -30,6 +38,7 @@ function App() {
         }
 
         setGatewayConfig(config)
+        setDiagnostics(diagnosticsResult)
         setHealth(healthResult.status)
         setExamplePlugin(exampleResult.plugin)
       } catch (err) {
@@ -38,6 +47,10 @@ function App() {
         }
         const message = err instanceof Error ? err.message : String(err)
         setError(message)
+        const diagnosticsResult = await getGatewayDiagnostics().catch(() => null)
+        if (diagnosticsResult) {
+          setDiagnostics(diagnosticsResult)
+        }
       }
     }
 
@@ -46,6 +59,11 @@ function App() {
       active = false
     }
   }, [])
+
+  const shouldShowDiagnostics =
+    !!error ||
+    (diagnostics !== null && !diagnostics.healthy) ||
+    (health !== 'loading' && health !== 'ok')
 
   return (
     <>
@@ -57,9 +75,6 @@ function App() {
             <>
               <p>
                 Base URL: <code>{gatewayConfig.baseUrl}</code>
-              </p>
-              <p>
-                Auth Token: <code>{gatewayConfig.token}</code>
               </p>
             </>
           ) : (
@@ -75,6 +90,19 @@ function App() {
             <p>
               Error: <code>{error}</code>
             </p>
+          ) : null}
+          {diagnostics && shouldShowDiagnostics ? (
+            <div>
+              <p>
+                Diagnostics: <code>{diagnostics.startupErrorSummary ?? 'runtime unhealthy'}</code>
+              </p>
+              {diagnostics.recentEventLines.length > 0 ? (
+                <p>
+                  Recent logs:{' '}
+                  <code>{diagnostics.recentEventLines.slice(-3).join(' | ')}</code>
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </section>
