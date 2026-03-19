@@ -1,4 +1,6 @@
 import json
+import sys
+import textwrap
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +12,56 @@ from gateway.plugin_loader import (
     activate_plugin_descriptors,
     discover_api_plugins,
 )
+from gateway.process_manager import ProcessManager
+
+
+def _oop_server_command(*, startup_delay_seconds: float = 0.0) -> list[str]:
+    script = textwrap.dedent(
+        f"""
+        import json
+        import os
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        port = int(os.environ["CONFLUOX_PLUGIN_PORT"])
+        prefix = os.environ["CONFLUOX_PLUGIN_PREFIX"]
+        time.sleep({startup_delay_seconds})
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+
+            def do_GET(self):
+                if self.path == "/__confluox/health":
+                    payload = json.dumps({{"status": "ok"}}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+
+                if self.path == prefix or self.path.startswith(prefix + "/"):
+                    payload = json.dumps({{"plugin": "api_oop", "path": self.path}}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+
+                payload = json.dumps({{"error": "not_found"}}).encode("utf-8")
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server.serve_forever()
+        """
+    )
+    return [sys.executable, "-c", script]
 
 
 def test_discovery_does_not_import_entry_modules(tmp_path) -> None:
@@ -245,6 +297,7 @@ def test_discovery_blocks_out_of_process_api_by_default(tmp_path) -> None:
                 "entry": "entry:setup",
                 "name": "api_oop",
                 "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
             }
         ),
         encoding="utf-8",
@@ -269,6 +322,7 @@ def test_discovery_allows_out_of_process_when_policy_allows(tmp_path) -> None:
                 "entry": "entry:setup",
                 "name": "api_oop",
                 "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
             }
         ),
         encoding="utf-8",
@@ -287,7 +341,7 @@ def test_discovery_allows_out_of_process_when_policy_allows(tmp_path) -> None:
     assert descriptors[0].execution_mode == "out_of_process"
 
 
-def test_activation_rejects_out_of_process_execution_mode(tmp_path) -> None:
+def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -298,6 +352,7 @@ def test_activation_rejects_out_of_process_execution_mode(tmp_path) -> None:
                 "entry": "entry:setup",
                 "name": "api_oop",
                 "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
             }
         ),
         encoding="utf-8",
@@ -312,7 +367,57 @@ def test_activation_rejects_out_of_process_execution_mode(tmp_path) -> None:
         app=app,
         data_dir=str(tmp_path),
         auth=None,
-        process_manager=None,
+        process_manager=ProcessManager(),
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+    loaded = activate_plugin_descriptors(
+        descriptors,
+        context,
+        out_of_process_boot_timeout_seconds=1.5,
+    )
+    assert loaded == ["api_oop"]
+
+    client = TestClient(app)
+    response = client.get("/api/api_oop")
+    assert response.status_code == 200
+    assert response.json()["plugin"] == "api_oop"
+    assert response.json()["path"] == "/api/api_oop"
+
+    context.process_manager.terminate_all(timeout=1.5)
+
+
+def test_activation_reports_boot_timeout_for_out_of_process_plugin(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop_timeout"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop_timeout",
+                "execution_mode": "out_of_process",
+                "command": [sys.executable, "-c", "import time; time.sleep(10)"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(
@@ -320,5 +425,102 @@ def test_activation_rejects_out_of_process_execution_mode(tmp_path) -> None:
         execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
     )
 
-    with pytest.raises(ValueError, match="out_of_process"):
-        activate_plugin_descriptors(descriptors, context)
+    with pytest.raises(ValueError, match="api_oop_boot_timeout"):
+        activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=0.2,
+        )
+
+    manager.terminate_all(timeout=1.5)
+
+
+def test_activation_reports_process_crash_for_out_of_process_plugin(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop_crash"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop_crash",
+                "execution_mode": "out_of_process",
+                "command": [sys.executable, "-c", "import sys; sys.exit(7)"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+
+    with pytest.raises(ValueError, match="api_oop_process_exited"):
+        activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=1.0,
+        )
+
+
+def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop",
+                "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+    activate_plugin_descriptors(
+        descriptors,
+        context,
+        out_of_process_boot_timeout_seconds=1.5,
+    )
+
+    manager.terminate_all(timeout=1.5)
+    client = TestClient(app)
+    response = client.get("/api/api_oop")
+    assert response.status_code == 502
+    assert response.json()["error"] == "api_oop_upstream_unavailable"
+    assert response.json()["plugin"] == "api_oop"

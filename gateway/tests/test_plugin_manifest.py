@@ -119,10 +119,39 @@ def test_accepts_api_execution_mode_when_valid() -> None:
             "name": "api_out_of_process",
             "entry": "entry:setup",
             "execution_mode": "out_of_process",
+            "command": ["python3", "-m", "api_plugin.main"],
         }
     )
 
     assert manifest.execution_mode == "out_of_process"
+    assert manifest.command == ["python3", "-m", "api_plugin.main"]
+
+
+def test_requires_command_for_api_out_of_process_mode() -> None:
+    with pytest.raises(ValueError, match="command"):
+        parse_plugin_manifest(
+            {
+                "type": "api",
+                "name": "api_oop_without_command",
+                "entry": "entry:setup",
+                "execution_mode": "out_of_process",
+            }
+        )
+
+
+def test_accepts_command_for_api_out_of_process_mode() -> None:
+    manifest = parse_plugin_manifest(
+        {
+            "type": "api",
+            "name": "api_oop_with_command",
+            "entry": "entry:setup",
+            "execution_mode": "out_of_process",
+            "command": ["python3", "-m", "api_plugin.main"],
+        }
+    )
+
+    assert manifest.execution_mode == "out_of_process"
+    assert manifest.command == ["python3", "-m", "api_plugin.main"]
 
 
 def test_rejects_execution_mode_on_worker_plugin() -> None:

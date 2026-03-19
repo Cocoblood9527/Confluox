@@ -13,6 +13,7 @@ class Config:
     trusted_api_plugin_roots: tuple[str, ...]
     trusted_api_plugins: tuple[str, ...]
     allowed_api_execution_modes: tuple[str, ...]
+    api_out_of_process_boot_timeout_seconds: float
 
 
 def parse_config(
@@ -42,6 +43,11 @@ def parse_config(
         dest="allowed_api_execution_modes",
         default=None,
     )
+    parser.add_argument(
+        "--api-out-of-process-boot-timeout-seconds",
+        type=float,
+        default=source_env.get("CONFLUOX_API_OOP_BOOT_TIMEOUT_SECONDS"),
+    )
 
     parsed = parser.parse_args(list(args or []))
 
@@ -59,6 +65,10 @@ def parse_config(
         allowed_api_execution_modes=tuple(
             _split_csv(source_env.get("CONFLUOX_ALLOWED_API_EXECUTION_MODES"))
             + list(parsed.allowed_api_execution_modes or [])
+        ),
+        api_out_of_process_boot_timeout_seconds=_default_float(
+            parsed.api_out_of_process_boot_timeout_seconds,
+            default=3.0,
         ),
     )
     return config
@@ -80,3 +90,9 @@ def _split_csv(raw: str | None) -> list[str]:
     if raw is None or raw.strip() == "":
         return []
     return [item.strip() for item in raw.split(",") if item.strip() != ""]
+
+
+def _default_float(value: float | None, *, default: float) -> float:
+    if value is None:
+        return default
+    return float(value)

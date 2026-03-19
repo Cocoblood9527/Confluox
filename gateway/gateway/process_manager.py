@@ -5,6 +5,7 @@ import signal
 import subprocess
 from dataclasses import dataclass
 from collections.abc import Sequence
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -19,12 +20,22 @@ class ProcessManager:
         self._processes: list[subprocess.Popen[bytes]] = []
         self._workers: dict[str, subprocess.Popen[bytes]] = {}
 
-    def spawn(self, args: Sequence[str]) -> subprocess.Popen[bytes]:
+    def spawn(
+        self,
+        args: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> subprocess.Popen[bytes]:
         kwargs: dict[str, object] = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             kwargs["start_new_session"] = True
+        if env is not None:
+            kwargs["env"] = dict(env)
+        if cwd is not None:
+            kwargs["cwd"] = cwd
 
         process = subprocess.Popen(list(args), **kwargs)
         self._processes.append(process)
@@ -34,8 +45,15 @@ class ProcessManager:
         if process not in self._processes:
             self._processes.append(process)
 
-    def spawn_worker(self, name: str, args: Sequence[str]) -> subprocess.Popen[bytes]:
-        process = self.spawn(args)
+    def spawn_worker(
+        self,
+        name: str,
+        args: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> subprocess.Popen[bytes]:
+        process = self.spawn(args, env=env, cwd=cwd)
         self._workers[name] = process
         return process
 

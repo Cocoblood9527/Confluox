@@ -47,7 +47,10 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
         if any(not isinstance(part, str) or part == "" for part in command):
             raise ValueError("command must be a list of non-empty strings")
     elif command is not None:
-        raise ValueError("command is only valid for worker plugins")
+        if not isinstance(command, list) or len(command) == 0:
+            raise ValueError("command must be a list of non-empty strings")
+        if any(not isinstance(part, str) or part == "" for part in command):
+            raise ValueError("command must be a list of non-empty strings")
 
     runtime = payload.get("runtime")
     if runtime is not None and (not isinstance(runtime, str) or runtime == ""):
@@ -68,6 +71,13 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
             raise ValueError("execution_mode is only valid for api plugins")
         if execution_mode not in API_EXECUTION_MODES:
             raise ValueError("execution_mode must be one of: in_process, out_of_process")
+        if execution_mode == "out_of_process":
+            if not isinstance(command, list) or len(command) == 0:
+                raise ValueError("command is required for api out_of_process plugins")
+        elif command is not None:
+            raise ValueError("command is only valid for api out_of_process plugins")
+    elif plugin_type == "api" and command is not None:
+        raise ValueError("command is only valid for api out_of_process plugins")
 
     permissions_raw = payload.get("permissions", {})
     if not isinstance(permissions_raw, Mapping):

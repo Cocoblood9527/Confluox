@@ -235,7 +235,11 @@ def run_gateway(argv: list[str] | None = None) -> None:
             allowed_modes=config.allowed_api_execution_modes,
         ),
     )
-    activate_plugin_descriptors(plugin_descriptors, plugin_context)
+    activate_plugin_descriptors(
+        plugin_descriptors,
+        plugin_context,
+        out_of_process_boot_timeout_seconds=config.api_out_of_process_boot_timeout_seconds,
+    )
     worker_descriptors = discover_worker_plugins(plugins_dir)
     start_worker_plugins(
         worker_descriptors,
