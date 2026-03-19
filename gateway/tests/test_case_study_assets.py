@@ -16,6 +16,7 @@ EXAMPLE_DIRS = (
     REPO_ROOT / "plugins/examples/index_worker_template",
     REPO_ROOT / "plugins/examples/md_builder_template",
 )
+CI_WORKFLOW_PATH = REPO_ROOT / ".github/workflows/ci-dual-track.yml"
 
 
 def test_case_study_docs_exist() -> None:
@@ -59,3 +60,10 @@ def test_case_study_template_manifests_parse() -> None:
     for manifest_path in manifest_paths:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         parse_plugin_manifest(payload)
+
+
+def test_ci_workflow_runs_case_study_runtime_smoke_test() -> None:
+    content = CI_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert (
+        "gateway/tests/test_case_study_templates_runtime.py" in content
+    ), "ci must run case-study runtime smoke test"

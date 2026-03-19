@@ -185,6 +185,7 @@ Case-doc and template smoke check:
 
 ```bash
 PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_case_study_assets.py -q
+PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_case_study_templates_runtime.py -q
 ```
 
 ## Related Guides
