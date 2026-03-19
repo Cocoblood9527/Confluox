@@ -60,11 +60,13 @@ plugins/
 - `type`：`worker`
 - `runtime`：运行时标签（文档/元数据用途）
 - `permissions`：worker 启动前会强制执行的权限声明
+- `sandbox_profile`：可选的 worker 沙箱 profile 声明（如 `restricted`、`strict`）
 - `command`：由网关通过 `process_manager` 启动的命令数组
 
 注意：
 
 - `permissions` 现在会在启动前执行校验，违反策略会拒绝启动 worker 进程。
+- `sandbox_profile` 也会在 spawn 前校验，不在允许列表内会被拒绝并返回策略原因。
 - 当前 enforcement 是 allowlist 启动门禁，不是完整的操作系统级沙箱。
 - `worker` 不会自动暴露 API 路由；它是后台受管进程模型。
 
@@ -80,6 +82,23 @@ plugins/
 
 - `--trusted-api-plugin-root` / `CONFLUOX_TRUSTED_API_PLUGIN_ROOTS`：新增受信任根路径
 - `--trusted-api-plugin` / `CONFLUOX_TRUSTED_API_PLUGINS`：按插件名显式信任（用于不受信任来源）
+
+## API 执行模式策略
+
+`api` manifest 现在可选声明 `execution_mode`：
+
+- `in_process`（默认）：当前支持的执行模式
+- `out_of_process`：为后续隔离路径预留的策略契约模式
+
+当前行为：
+
+- 插件发现阶段会按 host allowlist 校验 execution mode
+- 激活阶段当前仅支持 `in_process`
+- `out_of_process` 描述符在激活阶段会被显式拒绝并给出原因
+
+启动时执行模式配置：
+
+- `--allowed-api-execution-mode` / `CONFLUOX_ALLOWED_API_EXECUTION_MODES`：发现阶段可用模式白名单
 
 ## 入口函数
 

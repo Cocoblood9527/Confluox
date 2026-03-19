@@ -60,11 +60,13 @@ Minimal `worker` manifest example:
 - `type`: `worker`
 - `runtime`: runtime label used as metadata
 - `permissions`: enforced startup policy declarations for worker launch
+- `sandbox_profile`: optional worker sandbox profile declaration (`restricted`, `strict`, etc.)
 - `command`: argv array started by the gateway through `process_manager`
 
 Important:
 
 - `permissions` is enforced at startup: policy violations reject worker launch before process spawn.
+- `sandbox_profile` is also enforced before spawn; disallowed profiles are rejected with policy diagnostics.
 - enforcement is allowlist-based and is not a full OS sandbox policy engine.
 - `worker` plugins do not automatically expose HTTP routes.
 
@@ -80,6 +82,23 @@ Startup trust configuration:
 
 - `--trusted-api-plugin-root` / `CONFLUOX_TRUSTED_API_PLUGIN_ROOTS`: add extra trusted roots
 - `--trusted-api-plugin` / `CONFLUOX_TRUSTED_API_PLUGINS`: trust specific plugin names from otherwise untrusted sources
+
+## API Execution Mode Policy
+
+`api` manifest can optionally declare `execution_mode`:
+
+- `in_process` (default): current supported mode
+- `out_of_process`: policy-contract mode for future isolation path
+
+Current behavior:
+
+- discovery enforces host allowlist for api execution modes
+- activation currently supports only `in_process`
+- `out_of_process` descriptors are rejected at activation with explicit reason
+
+Startup execution mode configuration:
+
+- `--allowed-api-execution-mode` / `CONFLUOX_ALLOWED_API_EXECUTION_MODES`: allowlisted modes for discovery policy
 
 ## Entry Function
 
