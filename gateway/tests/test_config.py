@@ -33,6 +33,61 @@ def test_parse_config_from_env() -> None:
     assert config.host_pid == 4321
 
 
+def test_parse_config_accepts_bootstrap_fields_from_cli() -> None:
+    config = parse_config(
+        [
+            "--ready-file",
+            "/tmp/gateway.ready.json",
+            "--host-pid",
+            "4321",
+            "--data-dir",
+            "/tmp/confluox-data",
+            "--auth-token",
+            "secret-token",
+            "--allowed-origin",
+            "https://app.local",
+        ]
+    )
+
+    assert config.data_dir == "/tmp/confluox-data"
+    assert config.auth_token == "secret-token"
+    assert config.allowed_origin == "https://app.local"
+
+
+def test_parse_config_accepts_bootstrap_fields_from_env() -> None:
+    config = parse_config(
+        [
+            "--ready-file",
+            "/tmp/gateway.ready.json",
+            "--host-pid",
+            "4321",
+        ],
+        env={
+            "CONFLUOX_DATA_DIR": "/tmp/confluox-data-env",
+            "CONFLUOX_AUTH_TOKEN": "secret-token-env",
+            "CONFLUOX_ALLOWED_ORIGIN": "https://env.app.local",
+        },
+    )
+
+    assert config.data_dir == "/tmp/confluox-data-env"
+    assert config.auth_token == "secret-token-env"
+    assert config.allowed_origin == "https://env.app.local"
+
+
+def test_parse_config_rejects_wildcard_allowed_origin() -> None:
+    with pytest.raises(ValueError, match="allowed_origin"):
+        parse_config(
+            [
+                "--ready-file",
+                "/tmp/gateway.ready.json",
+                "--host-pid",
+                "4321",
+                "--allowed-origin",
+                "*",
+            ]
+        )
+
+
 def test_parse_config_allows_api_execution_mode_from_env_and_cli() -> None:
     config = parse_config(
         [

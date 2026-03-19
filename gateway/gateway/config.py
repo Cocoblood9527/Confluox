@@ -10,6 +10,9 @@ from typing import Mapping, Sequence
 class Config:
     ready_file: str
     host_pid: int
+    data_dir: str | None
+    auth_token: str | None
+    allowed_origin: str | None
     trusted_api_plugin_roots: tuple[str, ...]
     trusted_api_plugins: tuple[str, ...]
     allowed_api_execution_modes: tuple[str, ...]
@@ -28,6 +31,12 @@ def parse_config(
     parser = argparse.ArgumentParser(prog="confluox-gateway")
     parser.add_argument("--ready-file", default=source_env.get("CONFLUOX_READY_FILE"))
     parser.add_argument("--host-pid", type=int, default=source_env.get("CONFLUOX_HOST_PID"))
+    parser.add_argument("--data-dir", default=source_env.get("CONFLUOX_DATA_DIR"))
+    parser.add_argument("--auth-token", default=source_env.get("CONFLUOX_AUTH_TOKEN"))
+    parser.add_argument(
+        "--allowed-origin",
+        default=source_env.get("CONFLUOX_ALLOWED_ORIGIN"),
+    )
     parser.add_argument(
         "--trusted-api-plugin-root",
         action="append",
@@ -72,6 +81,9 @@ def parse_config(
     config = Config(
         ready_file=_require(parsed.ready_file, "ready_file"),
         host_pid=_require_int(parsed.host_pid, "host_pid"),
+        data_dir=_optional_non_empty(parsed.data_dir),
+        auth_token=_optional_non_empty(parsed.auth_token),
+        allowed_origin=_optional_non_empty(parsed.allowed_origin),
         trusted_api_plugin_roots=tuple(
             _split_csv(source_env.get("CONFLUOX_TRUSTED_API_PLUGIN_ROOTS"))
             + list(parsed.trusted_api_plugin_roots or [])
@@ -113,6 +125,8 @@ def parse_config(
         config.api_out_of_process_circuit_open_seconds,
         "api_out_of_process_circuit_open_seconds",
     )
+    if config.allowed_origin == "*":
+        raise ValueError("allowed_origin cannot be wildcard '*'")
     return config
 
 
@@ -132,6 +146,15 @@ def _split_csv(raw: str | None) -> list[str]:
     if raw is None or raw.strip() == "":
         return []
     return [item.strip() for item in raw.split(",") if item.strip() != ""]
+
+
+def _optional_non_empty(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if stripped == "":
+        return None
+    return stripped
 
 
 def _default_float(value: float | None, *, default: float) -> float:
