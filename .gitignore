@@ -9,3 +9,9 @@ src-tauri/gen/
 src-tauri/target/
 docs/plan/
 docs/superpowers/
+docs/zh-CN/architecture-review.md
+docs/zh-CN/release-v0.2.0-worker-policy-enforcement.md
+docs/zh-CN/release-v0.2.4-案例模板与运行时冒烟测试.md
+docs/en/architecture-review.md
+docs/en/release-v0.2.0-worker-policy-enforcement.md
+docs/en/release-v0.2.4-case-study-templates-and-smoke-tests.md
