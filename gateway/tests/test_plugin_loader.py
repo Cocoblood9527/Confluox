@@ -1,6 +1,10 @@
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import socket
 import sys
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +38,93 @@ def _oop_server_command(
     if fixed_expected_token is not None:
         command.extend(["--fixed-expected-token", fixed_expected_token])
     return command
+
+
+class _AliveProcess:
+    returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return None
+
+
+class _StubProcessManager:
+    def __init__(self) -> None:
+        self.spawn_calls: list[dict[str, object]] = []
+
+    def spawn(
+        self,
+        args,
+        *,
+        env=None,
+        cwd=None,
+        preexec_fn=None,
+    ) -> _AliveProcess:
+        self.spawn_calls.append(
+            {
+                "args": list(args),
+                "env": dict(env) if env is not None else None,
+                "cwd": cwd,
+                "preexec_fn": preexec_fn,
+            }
+        )
+        return _AliveProcess()
+
+    def terminate_all(self, timeout: float = 3.0) -> None:  # pragma: no cover - no-op helper
+        return
+
+
+class _FixedPortReservation:
+    def close(self) -> None:
+        return
+
+
+@contextmanager
+def _run_local_oop_stub_server(route_prefix: str):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):  # noqa: A003 - stdlib signature
+            return
+
+        def _json(self, status: int, payload: dict[str, str]) -> None:
+            raw = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib signature
+            if self.path == "/__confluox/health":
+                self._json(200, {"status": "ok"})
+                return
+            if self.path == route_prefix or self.path.startswith(route_prefix + "/"):
+                self._json(200, {"plugin": "api_oop", "path": self.path})
+                return
+            self._json(404, {"error": "not_found"})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield int(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1.0)
+
+
+def _pin_out_of_process_port(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
+    monkeypatch.setattr(
+        "gateway.plugin_loader._bind_loopback_ephemeral_port",
+        lambda: (_FixedPortReservation(), port),
+    )
+
+
+def _make_unused_loopback_port() -> int:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = int(sock.getsockname()[1])
+    sock.close()
+    return port
 
 
 def test_discovery_does_not_import_entry_modules(tmp_path) -> None:
@@ -313,7 +404,10 @@ def test_discovery_allows_out_of_process_when_policy_allows(tmp_path) -> None:
     assert descriptors[0].execution_mode == "out_of_process"
 
 
-def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) -> None:
+def test_activation_starts_out_of_process_plugin_and_proxies_routes(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -334,32 +428,33 @@ def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) ->
         encoding="utf-8",
     )
 
-    app = create_app()
-    context = PluginContext(
-        app=app,
-        data_dir=str(tmp_path),
-        auth=None,
-        process_manager=ProcessManager(),
-        resource_resolver=lambda relative_path: relative_path,
-    )
-    descriptors = discover_api_plugins(
-        plugins_dir,
-        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
-    )
-    loaded = activate_plugin_descriptors(
-        descriptors,
-        context,
-        out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
-    )
-    assert loaded == ["api_oop"]
+    with _run_local_oop_stub_server("/api/api_oop") as upstream_port:
+        _pin_out_of_process_port(monkeypatch, upstream_port)
 
-    client = TestClient(app)
-    response = client.get("/api/api_oop")
-    assert response.status_code == 200
-    assert response.json()["plugin"] == "api_oop"
-    assert response.json()["path"] == "/api/api_oop"
+        app = create_app()
+        context = PluginContext(
+            app=app,
+            data_dir=str(tmp_path),
+            auth=None,
+            process_manager=_StubProcessManager(),
+            resource_resolver=lambda relative_path: relative_path,
+        )
+        descriptors = discover_api_plugins(
+            plugins_dir,
+            execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+        )
+        loaded = activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
+        )
+        assert loaded == ["api_oop"]
 
-    context.process_manager.terminate_all(timeout=1.5)
+        client = TestClient(app)
+        response = client.get("/api/api_oop")
+        assert response.status_code == 200
+        assert response.json()["plugin"] == "api_oop"
+        assert response.json()["path"] == "/api/api_oop"
 
 
 def test_activation_ignores_proxy_env_for_local_out_of_process_routes(
@@ -392,32 +487,32 @@ def test_activation_ignores_proxy_env_for_local_out_of_process_routes(
     monkeypatch.setenv("ALL_PROXY", "http://10.255.255.1:12345")
     monkeypatch.setenv("NO_PROXY", "")
 
-    app = create_app()
-    manager = ProcessManager()
-    context = PluginContext(
-        app=app,
-        data_dir=str(tmp_path),
-        auth=None,
-        process_manager=manager,
-        resource_resolver=lambda relative_path: relative_path,
-    )
-    descriptors = discover_api_plugins(
-        plugins_dir,
-        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
-    )
-    loaded = activate_plugin_descriptors(
-        descriptors,
-        context,
-        out_of_process_boot_timeout_seconds=1.5,
-    )
-    assert loaded == ["api_oop_proxy_env"]
+    with _run_local_oop_stub_server("/api/api_oop_proxy_env") as upstream_port:
+        _pin_out_of_process_port(monkeypatch, upstream_port)
 
-    client = TestClient(app)
-    response = client.get("/api/api_oop_proxy_env")
-    assert response.status_code == 200
-    assert response.json()["path"] == "/api/api_oop_proxy_env"
+        app = create_app()
+        context = PluginContext(
+            app=app,
+            data_dir=str(tmp_path),
+            auth=None,
+            process_manager=_StubProcessManager(),
+            resource_resolver=lambda relative_path: relative_path,
+        )
+        descriptors = discover_api_plugins(
+            plugins_dir,
+            execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+        )
+        loaded = activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=1.5,
+        )
+        assert loaded == ["api_oop_proxy_env"]
 
-    manager.terminate_all(timeout=1.5)
+        client = TestClient(app)
+        response = client.get("/api/api_oop_proxy_env")
+        assert response.status_code == 200
+        assert response.json()["path"] == "/api/api_oop_proxy_env"
 
 
 def test_activation_reports_boot_timeout_for_out_of_process_plugin(tmp_path) -> None:
@@ -508,7 +603,10 @@ def test_activation_reports_process_crash_for_out_of_process_plugin(tmp_path) ->
         )
 
 
-def test_activation_reports_auth_failure_for_out_of_process_plugin(tmp_path) -> None:
+def test_activation_reports_auth_failure_for_out_of_process_plugin(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop_auth_failure"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -529,13 +627,17 @@ def test_activation_reports_auth_failure_for_out_of_process_plugin(tmp_path) -> 
         encoding="utf-8",
     )
 
+    def _raise_auth_failure(**_kwargs):
+        raise ValueError("api_oop_auth_failed: plugin 'api_oop_auth_failure' rejected host auth token")
+
+    monkeypatch.setattr("gateway.plugin_loader._wait_for_out_of_process_health", _raise_auth_failure)
+
     app = create_app()
-    manager = ProcessManager()
     context = PluginContext(
         app=app,
         data_dir=str(tmp_path),
         auth=None,
-        process_manager=manager,
+        process_manager=_StubProcessManager(),
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(
@@ -549,10 +651,12 @@ def test_activation_reports_auth_failure_for_out_of_process_plugin(tmp_path) -> 
             context,
             out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
         )
-    manager.terminate_all(timeout=1.5)
 
 
-def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) -> None:
+def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugins_dir = tmp_path / "plugins"
     for plugin_name in ("api_oop_one", "api_oop_two"):
         plugin_dir = plugins_dir / plugin_name
@@ -574,13 +678,17 @@ def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) 
             encoding="utf-8",
         )
 
+    monkeypatch.setattr(
+        "gateway.plugin_loader._wait_for_out_of_process_health",
+        lambda **_kwargs: None,
+    )
+
     app = create_app()
-    manager = ProcessManager()
     context = PluginContext(
         app=app,
         data_dir=str(tmp_path),
         auth=None,
-        process_manager=manager,
+        process_manager=_StubProcessManager(),
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(
@@ -595,10 +703,12 @@ def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) 
             out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
             out_of_process_max_active_plugins=1,
         )
-    manager.terminate_all(timeout=1.5)
 
 
-def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable(tmp_path) -> None:
+def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -619,13 +729,18 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
         encoding="utf-8",
     )
 
+    monkeypatch.setattr(
+        "gateway.plugin_loader._wait_for_out_of_process_health",
+        lambda **_kwargs: None,
+    )
+    _pin_out_of_process_port(monkeypatch, _make_unused_loopback_port())
+
     app = create_app()
-    manager = ProcessManager()
     context = PluginContext(
         app=app,
         data_dir=str(tmp_path),
         auth=None,
-        process_manager=manager,
+        process_manager=_StubProcessManager(),
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(
@@ -638,7 +753,6 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
         out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
     )
 
-    manager.terminate_all(timeout=1.5)
     client = TestClient(app)
     response = client.get("/api/api_oop")
     assert response.status_code == 502
@@ -646,7 +760,10 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
     assert response.json()["plugin"] == "api_oop"
 
 
-def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) -> None:
+def test_proxy_opens_circuit_after_repeated_out_of_process_failures(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -667,13 +784,18 @@ def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) ->
         encoding="utf-8",
     )
 
+    monkeypatch.setattr(
+        "gateway.plugin_loader._wait_for_out_of_process_health",
+        lambda **_kwargs: None,
+    )
+    _pin_out_of_process_port(monkeypatch, _make_unused_loopback_port())
+
     app = create_app()
-    manager = ProcessManager()
     context = PluginContext(
         app=app,
         data_dir=str(tmp_path),
         auth=None,
-        process_manager=manager,
+        process_manager=_StubProcessManager(),
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(
@@ -688,7 +810,6 @@ def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) ->
         out_of_process_proxy_circuit_open_seconds=5.0,
     )
 
-    manager.terminate_all(timeout=1.5)
     client = TestClient(app)
     first = client.get("/api/api_oop")
     second = client.get("/api/api_oop")
