@@ -1,5 +1,8 @@
 use crate::gateway_artifact::resolve_gateway_binary_from_artifacts;
 use crate::gateway_diagnostics::SharedGatewayDiagnostics;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
@@ -9,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use sha2::Sha256;
 use tauri::AppHandle;
 use tauri::Manager;
 use uuid::Uuid;
@@ -19,6 +23,22 @@ use uuid::Uuid;
 pub struct GatewayInfo {
     pub base_url: String,
     pub auth_token: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayAuthToken {
+    pub auth_token: String,
+    pub scope: String,
+    pub issued_at: u64,
+    pub ttl_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
+struct ScopedRuntimeTokenClaims {
+    scope: String,
+    issued_at: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +51,9 @@ struct ReadyPayload {
 
 pub struct GatewayRuntime {
     pub info: GatewayInfo,
+    token_secret: String,
+    token_scope: String,
+    token_ttl_seconds: u64,
     child: Mutex<Option<Child>>,
     bootstrap_stdin: Mutex<Option<ChildStdin>>,
     ready_file: PathBuf,
@@ -86,11 +109,29 @@ impl GatewayRuntime {
         let _ = fs::remove_file(&self.ready_file);
         Ok(())
     }
+
+    fn issue_runtime_auth_token(&self, issued_at: u64) -> Result<GatewayAuthToken, String> {
+        let auth_token =
+            issue_scoped_runtime_token(&self.token_secret, &self.token_scope, issued_at)?;
+        Ok(GatewayAuthToken {
+            auth_token,
+            scope: self.token_scope.clone(),
+            issued_at,
+            ttl_seconds: self.token_ttl_seconds,
+        })
+    }
 }
 
 #[tauri::command]
 pub fn get_gateway_info(state: tauri::State<'_, Arc<GatewayRuntime>>) -> GatewayInfo {
     state.info.clone()
+}
+
+#[tauri::command]
+pub fn refresh_gateway_auth_token(
+    state: tauri::State<'_, Arc<GatewayRuntime>>,
+) -> Result<GatewayAuthToken, String> {
+    state.issue_runtime_auth_token(current_unix_seconds()?)
 }
 
 pub fn start_gateway(
@@ -103,7 +144,12 @@ pub fn start_gateway(
     let ready_file = data_dir.join("gateway.ready.json");
     let _ = fs::remove_file(&ready_file);
 
-    let auth_token = Uuid::new_v4().to_string();
+    let auth_token_secret = Uuid::new_v4().to_string();
+    let token_scope = "gateway-api".to_string();
+    let token_ttl_seconds = 300_u64;
+    let token_issued_at = current_unix_seconds()?;
+    let auth_token =
+        issue_scoped_runtime_token(&auth_token_secret, &token_scope, token_issued_at)?;
     let host_pid = std::process::id();
     let allowed_origin = if cfg!(debug_assertions) {
         "http://localhost:1420".to_string()
@@ -114,7 +160,10 @@ pub fn start_gateway(
     let spawned = match spawn_gateway_process(
         app,
         &data_dir,
-        &auth_token,
+        &auth_token_secret,
+        &token_scope,
+        token_ttl_seconds,
+        token_issued_at,
         &ready_file,
         host_pid,
         &allowed_origin,
@@ -151,6 +200,9 @@ pub fn start_gateway(
             base_url: format!("http://127.0.0.1:{port}"),
             auth_token,
         },
+        token_secret: auth_token_secret,
+        token_scope,
+        token_ttl_seconds,
         child: Mutex::new(Some(child)),
         bootstrap_stdin: Mutex::new(Some(bootstrap_stdin)),
         ready_file,
@@ -166,7 +218,10 @@ struct SpawnedGatewayProcess {
 fn spawn_gateway_process(
     app: &AppHandle,
     data_dir: &Path,
-    auth_token: &str,
+    auth_token_secret: &str,
+    auth_token_scope: &str,
+    auth_token_ttl_seconds: u64,
+    auth_token_issued_at: u64,
     ready_file: &Path,
     host_pid: u32,
     allowed_origin: &str,
@@ -200,7 +255,10 @@ fn spawn_gateway_process(
     if let Err(err) = write_gateway_bootstrap_payload(
         &mut bootstrap_stdin,
         data_dir,
-        auth_token,
+        auth_token_secret,
+        auth_token_scope,
+        auth_token_ttl_seconds,
+        auth_token_issued_at,
         allowed_origin,
     ) {
         let _ = child.kill();
@@ -228,18 +286,27 @@ fn spawn_gateway_process(
 struct GatewayBootstrapPayload {
     data_dir: String,
     auth_token: String,
+    auth_token_scope: String,
+    auth_token_ttl_seconds: u64,
+    auth_token_issued_at: u64,
     allowed_origin: String,
 }
 
 fn write_gateway_bootstrap_payload(
     stdin: &mut ChildStdin,
     data_dir: &Path,
-    auth_token: &str,
+    auth_token_secret: &str,
+    auth_token_scope: &str,
+    auth_token_ttl_seconds: u64,
+    auth_token_issued_at: u64,
     allowed_origin: &str,
 ) -> Result<(), String> {
     let payload = GatewayBootstrapPayload {
         data_dir: data_dir.to_string_lossy().to_string(),
-        auth_token: auth_token.to_string(),
+        auth_token: auth_token_secret.to_string(),
+        auth_token_scope: auth_token_scope.to_string(),
+        auth_token_ttl_seconds,
+        auth_token_issued_at,
         allowed_origin: allowed_origin.to_string(),
     };
     serde_json::to_writer(&mut *stdin, &payload).map_err(|err| err.to_string())?;
@@ -348,6 +415,66 @@ fn with_gateway_diagnostics(
     }
 }
 
+type HmacSha256 = Hmac<Sha256>;
+
+fn issue_scoped_runtime_token(secret: &str, scope: &str, issued_at: u64) -> Result<String, String> {
+    let payload = serde_json::json!({
+        "scope": scope,
+        "issued_at": issued_at,
+    });
+    let payload_raw = serde_json::to_vec(&payload).map_err(|err| err.to_string())?;
+    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_raw);
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|err| err.to_string())?;
+    mac.update(payload_b64.as_bytes());
+    let signature = mac.finalize().into_bytes();
+    let signature_b64 = URL_SAFE_NO_PAD.encode(signature);
+    Ok(format!("cx1.{payload_b64}.{signature_b64}"))
+}
+
+#[cfg(test)]
+fn parse_scoped_runtime_token(token: &str, secret: &str) -> Result<ScopedRuntimeTokenClaims, String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 || parts[0] != "cx1" {
+        return Err("invalid token format".to_string());
+    }
+    let payload_b64 = parts[1];
+    let signature_b64 = parts[2];
+    let payload_raw = URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .map_err(|err| format!("invalid token payload: {err}"))?;
+    let signature_raw = URL_SAFE_NO_PAD
+        .decode(signature_b64.as_bytes())
+        .map_err(|err| format!("invalid token signature: {err}"))?;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|err| err.to_string())?;
+    mac.update(payload_b64.as_bytes());
+    mac.verify_slice(&signature_raw)
+        .map_err(|_| "token signature mismatch".to_string())?;
+
+    #[derive(Deserialize)]
+    struct RuntimeTokenPayload {
+        scope: String,
+        issued_at: u64,
+    }
+
+    let parsed: RuntimeTokenPayload =
+        serde_json::from_slice(&payload_raw).map_err(|err| format!("invalid token json: {err}"))?;
+    if parsed.scope.trim().is_empty() {
+        return Err("token scope is required".to_string());
+    }
+    Ok(ScopedRuntimeTokenClaims {
+        scope: parsed.scope,
+        issued_at: parsed.issued_at,
+    })
+}
+
+fn current_unix_seconds() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|delta| delta.as_secs())
+        .map_err(|err| format!("system clock error: {err}"))
+}
+
 fn resolve_python_interpreter() -> Result<String, String> {
     let mut candidates: Vec<String> = Vec::new();
     if let Ok(value) = env::var("CONFLUOX_PYTHON") {
@@ -392,4 +519,34 @@ fn workspace_root() -> Result<PathBuf, String> {
         .parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| "failed to resolve workspace root".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_refresh_token_issues_scoped_metadata() {
+        let secret = "runtime-secret";
+        let issued_at = 1_700_000_000_u64;
+
+        let token = issue_scoped_runtime_token(secret, "gateway-api", issued_at).unwrap();
+        let claims = parse_scoped_runtime_token(&token, secret).unwrap();
+
+        assert_eq!(claims.scope, "gateway-api");
+        assert_eq!(claims.issued_at, issued_at);
+    }
+
+    #[test]
+    fn gateway_refresh_token_rotates_issued_at() {
+        let secret = "runtime-secret";
+        let first = issue_scoped_runtime_token(secret, "gateway-api", 1_700_000_100_u64).unwrap();
+        let second = issue_scoped_runtime_token(secret, "gateway-api", 1_700_000_300_u64).unwrap();
+
+        let first_claims = parse_scoped_runtime_token(&first, secret).unwrap();
+        let second_claims = parse_scoped_runtime_token(&second, secret).unwrap();
+
+        assert!(second_claims.issued_at > first_claims.issued_at);
+        assert_eq!(second_claims.scope, "gateway-api");
+    }
 }

@@ -25,6 +25,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             gateway::get_gateway_info,
+            gateway::refresh_gateway_auth_token,
             gateway_diagnostics::get_gateway_diagnostics
         ])
         .on_window_event(|window, event| {

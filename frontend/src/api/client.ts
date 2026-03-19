@@ -32,6 +32,13 @@ type TauriGatewayPayload = {
   authToken: string
 }
 
+type TauriGatewayAuthTokenPayload = {
+  authToken: string
+  scope: string
+  issuedAt: number
+  ttlSeconds: number
+}
+
 type TauriGatewayDiagnosticsPayload = {
   healthy: boolean
   startupErrorSummary: string | null
@@ -75,6 +82,16 @@ async function request<T>(
   body?: unknown,
 ): Promise<T> {
   const config = await resolveGatewayConfig()
+  return requestWithToken<T>(config, method, path, body, false)
+}
+
+async function requestWithToken<T>(
+  config: GatewayRuntimeConfig,
+  method: 'GET' | 'POST',
+  path: string,
+  body: unknown,
+  hasRetriedAfterRefresh: boolean,
+): Promise<T> {
   const response = await fetch(`${config.baseUrl}${path}`, {
     method,
     headers: {
@@ -84,12 +101,43 @@ async function request<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
+  if (response.status === 401 && !hasRetriedAfterRefresh) {
+    const errorCode = await tryReadErrorCode(response)
+    if (errorCode === 'auth_token_expired') {
+      const nextToken = await refreshGatewayToken()
+      const nextConfig: GatewayRuntimeConfig = {
+        ...config,
+        token: nextToken.authToken,
+      }
+      window.__GATEWAY__ = nextConfig
+      configPromise = Promise.resolve(nextConfig)
+      return requestWithToken(nextConfig, method, path, body, true)
+    }
+  }
+
   if (!response.ok) {
     const text = await response.text()
     throw new Error(`${method} ${path} failed: ${response.status} ${text}`)
   }
 
   return (await response.json()) as T
+}
+
+async function refreshGatewayToken(): Promise<TauriGatewayAuthTokenPayload> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<TauriGatewayAuthTokenPayload>('refresh_gateway_auth_token')
+}
+
+async function tryReadErrorCode(response: Response): Promise<string | null> {
+  try {
+    const payload = (await response.clone().json()) as { error?: unknown }
+    if (typeof payload.error === 'string') {
+      return payload.error
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 export async function getGatewayConfig(): Promise<GatewayRuntimeConfig> {
