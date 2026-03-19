@@ -10,6 +10,15 @@ This guide provides 3 practical integration cases so you can quickly choose:
 
 All examples are aligned with what the current repository supports.
 
+## Terminology
+
+- `api in_process`: API plugin runs inside the gateway process
+- `api out_of_process`: API plugin runs as a separate process managed and proxied by the gateway
+- `worker`: managed background process that does not expose HTTP routes by default
+- `permissions`: startup policy declarations validated against the host allowlist
+- `sandbox_profile`: lightweight worker hardening profile (for example `restricted`, `strict`)
+- `X-Confluox-Plugin-Auth`: host-to-plugin internal auth header for out-of-process API mode
+
 ## Case 1: Whisper Local Transcription (`api out_of_process`)
 
 Best fit:
