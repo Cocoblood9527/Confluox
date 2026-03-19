@@ -1,6 +1,6 @@
 import json
+from pathlib import Path
 import sys
-import textwrap
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,81 +15,24 @@ from gateway.plugin_loader import (
 from gateway.process_manager import ProcessManager
 
 
+_OOP_SERVER_SCRIPT_PATH = Path(__file__).resolve().parent / "fixtures" / "oop_server.py"
+_OOP_BOOT_TIMEOUT_SECONDS = 5.0
+
+
 def _oop_server_command(
     *,
     startup_delay_seconds: float = 0.0,
     fixed_expected_token: str | None = None,
 ) -> list[str]:
-    expected_token_source = (
-        repr(fixed_expected_token)
-        if fixed_expected_token is not None
-        else "os.environ['CONFLUOX_PLUGIN_AUTH_TOKEN']"
-    )
-    script = textwrap.dedent(
-        f"""
-        import json
-        import os
-        import time
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-        port = int(os.environ["CONFLUOX_PLUGIN_PORT"])
-        prefix = os.environ["CONFLUOX_PLUGIN_PREFIX"]
-        expected_token = {expected_token_source}
-        time.sleep({startup_delay_seconds})
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, format, *args):
-                return
-
-            def do_GET(self):
-                if self.path == "/__confluox/health":
-                    token = self.headers.get("X-Confluox-Plugin-Auth", "")
-                    if token != expected_token:
-                        payload = json.dumps({{"error": "unauthorized"}}).encode("utf-8")
-                        self.send_response(401)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(payload)))
-                        self.end_headers()
-                        self.wfile.write(payload)
-                        return
-                    payload = json.dumps({{"status": "ok"}}).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
-                    return
-
-                if self.path == prefix or self.path.startswith(prefix + "/"):
-                    token = self.headers.get("X-Confluox-Plugin-Auth", "")
-                    if token != expected_token:
-                        payload = json.dumps({{"error": "unauthorized"}}).encode("utf-8")
-                        self.send_response(401)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(payload)))
-                        self.end_headers()
-                        self.wfile.write(payload)
-                        return
-                    payload = json.dumps({{"plugin": "api_oop", "path": self.path}}).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
-                    return
-
-                payload = json.dumps({{"error": "not_found"}}).encode("utf-8")
-                self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-        server.serve_forever()
-        """
-    )
-    return [sys.executable, "-c", script]
+    command = [
+        sys.executable,
+        str(_OOP_SERVER_SCRIPT_PATH),
+        "--startup-delay",
+        str(startup_delay_seconds),
+    ]
+    if fixed_expected_token is not None:
+        command.extend(["--fixed-expected-token", fixed_expected_token])
+    return command
 
 
 def test_discovery_does_not_import_entry_modules(tmp_path) -> None:
@@ -405,7 +348,7 @@ def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) ->
     loaded = activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=3.0,
+        out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
     )
     assert loaded == ["api_oop"]
 
@@ -502,7 +445,7 @@ def test_activation_reports_process_crash_for_out_of_process_plugin(tmp_path) ->
         activate_plugin_descriptors(
             descriptors,
             context,
-            out_of_process_boot_timeout_seconds=3.0,
+            out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
         )
 
 
@@ -545,7 +488,7 @@ def test_activation_reports_auth_failure_for_out_of_process_plugin(tmp_path) -> 
         activate_plugin_descriptors(
             descriptors,
             context,
-            out_of_process_boot_timeout_seconds=1.0,
+            out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
         )
     manager.terminate_all(timeout=1.5)
 
@@ -590,7 +533,7 @@ def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) 
         activate_plugin_descriptors(
             descriptors,
             context,
-            out_of_process_boot_timeout_seconds=3.0,
+            out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
             out_of_process_max_active_plugins=1,
         )
     manager.terminate_all(timeout=1.5)
@@ -633,7 +576,7 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
     activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=3.0,
+        out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
     )
 
     manager.terminate_all(timeout=1.5)
@@ -681,7 +624,7 @@ def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) ->
     activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=3.0,
+        out_of_process_boot_timeout_seconds=_OOP_BOOT_TIMEOUT_SECONDS,
         out_of_process_proxy_circuit_failure_threshold=2,
         out_of_process_proxy_circuit_open_seconds=5.0,
     )
