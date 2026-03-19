@@ -50,6 +50,7 @@ def build_ready_payload(
     status: str = "ready",
     version: str = "0.1.0",
     pid: int | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": status,
@@ -57,6 +58,8 @@ def build_ready_payload(
         "pid": int(os.getpid() if pid is None else pid),
         "version": version,
     }
+    if message is not None:
+        payload["message"] = message
     return payload
 
 

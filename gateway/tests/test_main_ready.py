@@ -45,6 +45,17 @@ def test_status_not_ready_is_not_available() -> None:
     assert is_ready_payload(error_payload) is False
 
 
+def test_build_error_ready_payload_contains_message() -> None:
+    payload = build_ready_payload(
+        port=32123,
+        status="error",
+        message="startup failed",
+    )
+
+    assert payload["status"] == "error"
+    assert payload["message"] == "startup failed"
+
+
 def test_ready_file_written_only_after_app_startup(tmp_path) -> None:
     ready_file = tmp_path / "ready.json"
     app = create_app()
