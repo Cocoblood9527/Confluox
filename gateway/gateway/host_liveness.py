@@ -46,6 +46,9 @@ def is_host_alive(host_pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    except OSError:
+        # Windows may raise generic OSError (e.g. WinError 87) for invalid PIDs.
+        return False
     return True
 
 

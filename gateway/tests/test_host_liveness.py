@@ -2,6 +2,8 @@ import os
 import threading
 import time
 
+import pytest
+
 from gateway.host_liveness import is_host_alive, start_host_liveness_watch
 
 
@@ -99,3 +101,16 @@ def test_pid_watch_triggers_callback_when_host_dead() -> None:
     )
 
     assert state["called"] is True
+
+
+def test_is_host_alive_returns_false_when_os_kill_raises_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_oserror(_: int, __: int) -> None:
+        err = OSError("invalid pid")
+        setattr(err, "winerror", 87)
+        raise err
+
+    monkeypatch.setattr("gateway.host_liveness.os.kill", raise_oserror)
+
+    assert is_host_alive(9_999_999) is False
