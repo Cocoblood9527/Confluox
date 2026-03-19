@@ -24,6 +24,7 @@ from gateway.plugin_loader import (
     discover_api_plugins,
 )
 from gateway.plugin_policy import (
+    ApiPluginExecutionPolicy,
     ApiPluginTrustPolicy,
     WorkerPermissionPolicy,
     WorkerSandboxProfilePolicy,
@@ -180,6 +181,15 @@ def default_api_trust_policy(
     )
 
 
+def default_api_execution_policy(
+    *,
+    allowed_modes: Sequence[str] = (),
+) -> ApiPluginExecutionPolicy:
+    if len(allowed_modes) == 0:
+        return ApiPluginExecutionPolicy(allowed_modes=("in_process",))
+    return ApiPluginExecutionPolicy(allowed_modes=tuple(allowed_modes))
+
+
 def run_gateway(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     config = parse_config(args)
@@ -220,6 +230,9 @@ def run_gateway(argv: list[str] | None = None) -> None:
             plugins_dir=plugins_dir,
             trusted_roots=config.trusted_api_plugin_roots,
             trusted_plugins=config.trusted_api_plugins,
+        ),
+        execution_policy=default_api_execution_policy(
+            allowed_modes=config.allowed_api_execution_modes,
         ),
     )
     activate_plugin_descriptors(plugin_descriptors, plugin_context)

@@ -8,6 +8,7 @@ from typing import Mapping, Sequence
 
 _ENTRY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._:/-]*$")
 _SANDBOX_PROFILE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_API_EXECUTION_MODES = {"in_process", "out_of_process"}
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,25 @@ class ApiPluginTrustDecision:
     trusted: bool
     trust_source: str
     reason: str | None
+
+
+@dataclass(frozen=True)
+class ApiPluginExecutionPolicy:
+    allowed_modes: Sequence[str]
+
+
+@dataclass(frozen=True)
+class ApiPluginExecutionViolation:
+    code: str
+    mode: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ApiPluginExecutionDecision:
+    allowed: bool
+    normalized_mode: str
+    violations: list[ApiPluginExecutionViolation]
 
 
 def normalize_permission_declarations(
@@ -206,6 +226,47 @@ def evaluate_api_plugin_trust(
     )
 
 
+def evaluate_api_plugin_execution_mode(
+    mode: str | None,
+    *,
+    policy: ApiPluginExecutionPolicy,
+) -> ApiPluginExecutionDecision:
+    normalized_mode = "in_process" if mode is None else mode
+    violations: list[ApiPluginExecutionViolation] = []
+
+    if normalized_mode not in _API_EXECUTION_MODES:
+        violations.append(
+            ApiPluginExecutionViolation(
+                code="invalid_execution_mode",
+                mode=normalized_mode,
+                message=(
+                    "api execution mode must be one of: in_process, out_of_process"
+                ),
+            )
+        )
+        return ApiPluginExecutionDecision(
+            allowed=False,
+            normalized_mode=normalized_mode,
+            violations=violations,
+        )
+
+    allowed_modes = _normalize_api_execution_mode_allowlist(policy.allowed_modes)
+    if normalized_mode not in allowed_modes:
+        violations.append(
+            ApiPluginExecutionViolation(
+                code="execution_mode_not_allowed",
+                mode=normalized_mode,
+                message=f"api execution mode '{normalized_mode}' is not allowed by host policy",
+            )
+        )
+
+    return ApiPluginExecutionDecision(
+        allowed=len(violations) == 0,
+        normalized_mode=normalized_mode,
+        violations=violations,
+    )
+
+
 def _normalize_permission_map(
     raw: Mapping[str, Sequence[str]],
     *,
@@ -247,4 +308,15 @@ def _normalize_sandbox_profile_allowlist(allowed_profiles: Sequence[str]) -> set
         if _SANDBOX_PROFILE_PATTERN.fullmatch(profile) is None:
             raise ValueError("allowed sandbox profile values are invalid")
         normalized.add(profile)
+    return normalized
+
+
+def _normalize_api_execution_mode_allowlist(allowed_modes: Sequence[str]) -> set[str]:
+    normalized: set[str] = set()
+    for mode in allowed_modes:
+        if not isinstance(mode, str) or mode == "":
+            raise ValueError("allowed api execution modes must be non-empty strings")
+        if mode not in _API_EXECUTION_MODES:
+            raise ValueError("allowed api execution mode values are invalid")
+        normalized.add(mode)
     return normalized

@@ -33,6 +33,24 @@ def test_parse_config_from_env() -> None:
     assert config.host_pid == 4321
 
 
+def test_parse_config_allows_api_execution_mode_from_env_and_cli() -> None:
+    config = parse_config(
+        [
+            "--ready-file",
+            "/tmp/gateway.ready.json",
+            "--host-pid",
+            "8888",
+            "--allowed-api-execution-mode",
+            "out_of_process",
+        ],
+        env={
+            "CONFLUOX_ALLOWED_API_EXECUTION_MODES": "in_process",
+        },
+    )
+
+    assert config.allowed_api_execution_modes == ("in_process", "out_of_process")
+
+
 def test_parse_bootstrap_from_stdin_json_line() -> None:
     stream = io.StringIO(
         '{"data_dir":"/tmp/data","auth_token":"secret-token","allowed_origin":"https://app.local"}\n'

@@ -12,6 +12,7 @@ class Config:
     host_pid: int
     trusted_api_plugin_roots: tuple[str, ...]
     trusted_api_plugins: tuple[str, ...]
+    allowed_api_execution_modes: tuple[str, ...]
 
 
 def parse_config(
@@ -35,6 +36,12 @@ def parse_config(
         dest="trusted_api_plugins",
         default=None,
     )
+    parser.add_argument(
+        "--allowed-api-execution-mode",
+        action="append",
+        dest="allowed_api_execution_modes",
+        default=None,
+    )
 
     parsed = parser.parse_args(list(args or []))
 
@@ -48,6 +55,10 @@ def parse_config(
         trusted_api_plugins=tuple(
             _split_csv(source_env.get("CONFLUOX_TRUSTED_API_PLUGINS"))
             + list(parsed.trusted_api_plugins or [])
+        ),
+        allowed_api_execution_modes=tuple(
+            _split_csv(source_env.get("CONFLUOX_ALLOWED_API_EXECUTION_MODES"))
+            + list(parsed.allowed_api_execution_modes or [])
         ),
     )
     return config

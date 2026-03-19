@@ -19,6 +19,7 @@ def test_parse_valid_legacy_api_manifest() -> None:
     assert manifest.name == "example_api"
     assert manifest.entry == "entry:setup"
     assert manifest.command is None
+    assert manifest.execution_mode is None
 
 
 def test_parse_valid_worker_manifest_with_command() -> None:
@@ -107,5 +108,42 @@ def test_rejects_sandbox_profile_on_api_plugin() -> None:
                 "name": "bad_api_sandbox_profile",
                 "entry": "entry:setup",
                 "sandbox_profile": "restricted",
+            }
+        )
+
+
+def test_accepts_api_execution_mode_when_valid() -> None:
+    manifest = parse_plugin_manifest(
+        {
+            "type": "api",
+            "name": "api_out_of_process",
+            "entry": "entry:setup",
+            "execution_mode": "out_of_process",
+        }
+    )
+
+    assert manifest.execution_mode == "out_of_process"
+
+
+def test_rejects_execution_mode_on_worker_plugin() -> None:
+    with pytest.raises(ValueError, match="execution_mode"):
+        parse_plugin_manifest(
+            {
+                "type": "worker",
+                "name": "bad_worker_execution_mode",
+                "command": ["python3", "-m", "worker.main"],
+                "execution_mode": "in_process",
+            }
+        )
+
+
+def test_rejects_invalid_api_execution_mode_value() -> None:
+    with pytest.raises(ValueError, match="execution_mode"):
+        parse_plugin_manifest(
+            {
+                "type": "api",
+                "name": "bad_api_execution_mode",
+                "entry": "entry:setup",
+                "execution_mode": "forked",
             }
         )

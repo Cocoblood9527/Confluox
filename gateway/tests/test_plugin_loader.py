@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.main import create_app
-from gateway.plugin_policy import ApiPluginTrustPolicy
+from gateway.plugin_policy import ApiPluginExecutionPolicy, ApiPluginTrustPolicy
 from gateway.plugin_loader import (
     PluginContext,
     activate_plugin_descriptors,
@@ -232,3 +232,93 @@ def test_discovery_allows_untrusted_plugin_when_explicitly_trusted(tmp_path) -> 
     assert [descriptor.name for descriptor in descriptors] == ["allowlisted_api"]
     assert descriptors[0].trusted is True
     assert descriptors[0].trust_source == "explicit_plugin_allowlist"
+
+
+def test_discovery_blocks_out_of_process_api_by_default(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop",
+                "execution_mode": "out_of_process",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="api execution mode not allowed"):
+        discover_api_plugins(plugins_dir)
+
+
+def test_discovery_allows_out_of_process_when_policy_allows(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop",
+                "execution_mode": "out_of_process",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+
+    assert len(descriptors) == 1
+    assert descriptors[0].execution_mode == "out_of_process"
+
+
+def test_activation_rejects_out_of_process_execution_mode(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop",
+                "execution_mode": "out_of_process",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=None,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+
+    with pytest.raises(ValueError, match="out_of_process"):
+        activate_plugin_descriptors(descriptors, context)

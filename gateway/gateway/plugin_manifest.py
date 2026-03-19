@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 
 PLUGIN_TYPES = {"api", "worker"}
+API_EXECUTION_MODES = {"in_process", "out_of_process"}
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class PluginManifest:
     permissions: dict[str, list[str]]
     command: list[str] | None
     sandbox_profile: str | None
+    execution_mode: str | None
 
 
 def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
@@ -58,6 +60,15 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
         if plugin_type != "worker":
             raise ValueError("sandbox_profile is only valid for worker plugins")
 
+    execution_mode = payload.get("execution_mode")
+    if execution_mode is not None:
+        if not isinstance(execution_mode, str) or execution_mode == "":
+            raise ValueError("execution_mode must be non-empty string when provided")
+        if plugin_type != "api":
+            raise ValueError("execution_mode is only valid for api plugins")
+        if execution_mode not in API_EXECUTION_MODES:
+            raise ValueError("execution_mode must be one of: in_process, out_of_process")
+
     permissions_raw = payload.get("permissions", {})
     if not isinstance(permissions_raw, Mapping):
         raise ValueError("permissions must be an object")
@@ -77,4 +88,5 @@ def parse_plugin_manifest(payload: Mapping[str, Any]) -> PluginManifest:
         permissions=permissions,
         command=list(command) if isinstance(command, list) else None,
         sandbox_profile=sandbox_profile,
+        execution_mode=execution_mode,
     )
