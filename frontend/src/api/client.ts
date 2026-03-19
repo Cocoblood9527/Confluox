@@ -15,6 +15,16 @@ export type GatewayDiagnostics = {
   recentEventLines: string[]
 }
 
+export type PluginActivationStatus = {
+  state: string
+  error_code: string | null
+  error_message: string | null
+}
+
+export type PluginActivationSnapshot = {
+  plugins: Record<string, PluginActivationStatus>
+}
+
 export type GatewayStreamChunk = SseChunk
 
 type TauriGatewayPayload = {
@@ -102,6 +112,10 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('POST', path, body)
+}
+
+export async function getPluginActivationSnapshot(): Promise<PluginActivationSnapshot> {
+  return request<PluginActivationSnapshot>('GET', '/api/system/plugin-activation')
 }
 
 export async function streamGatewaySse(
