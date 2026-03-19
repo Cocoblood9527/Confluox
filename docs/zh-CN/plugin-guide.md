@@ -111,7 +111,21 @@ Out-of-process 插件运行时契约：
 
 - host 注入 `CONFLUOX_PLUGIN_PORT`
 - host 注入 `CONFLUOX_PLUGIN_PREFIX`
+- host 注入 `CONFLUOX_PLUGIN_AUTH_TOKEN`
 - 插件必须提供 `GET /__confluox/health`，ready 时返回 `200`
+- 建议插件对健康检查和代理请求统一校验 `X-Confluox-Plugin-Auth`
+
+安全与韧性控制项：
+
+- `--api-out-of-process-max-active-plugins` / `CONFLUOX_API_OOP_MAX_ACTIVE_PLUGINS`：同时激活的 out-of-process API 插件上限
+- `--api-out-of-process-circuit-failure-threshold` / `CONFLUOX_API_OOP_CIRCUIT_FAILURE_THRESHOLD`：触发熔断前的连续失败阈值
+- `--api-out-of-process-circuit-open-seconds` / `CONFLUOX_API_OOP_CIRCUIT_OPEN_SECONDS`：熔断打开时长
+
+新增诊断码：
+
+- 鉴权握手失败：`api_oop_auth_failed`
+- 激活配额超限：`api_oop_quota_exceeded`
+- 熔断开启回退：`api_oop_circuit_open`
 
 ## 入口函数
 

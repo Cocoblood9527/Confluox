@@ -111,7 +111,21 @@ Out-of-process plugin runtime contract:
 
 - host injects `CONFLUOX_PLUGIN_PORT`
 - host injects `CONFLUOX_PLUGIN_PREFIX`
+- host injects `CONFLUOX_PLUGIN_AUTH_TOKEN`
 - plugin must expose `GET /__confluox/health` and return `200` when ready
+- plugin should require `X-Confluox-Plugin-Auth` for health and proxied requests
+
+Security and resilience controls:
+
+- `--api-out-of-process-max-active-plugins` / `CONFLUOX_API_OOP_MAX_ACTIVE_PLUGINS`: max simultaneously active out-of-process API plugins
+- `--api-out-of-process-circuit-failure-threshold` / `CONFLUOX_API_OOP_CIRCUIT_FAILURE_THRESHOLD`: consecutive failures before opening circuit
+- `--api-out-of-process-circuit-open-seconds` / `CONFLUOX_API_OOP_CIRCUIT_OPEN_SECONDS`: circuit-open duration
+
+Additional diagnostics:
+
+- auth handshake rejected: `api_oop_auth_failed`
+- activation quota exceeded: `api_oop_quota_exceeded`
+- circuit open fallback: `api_oop_circuit_open`
 
 ## Entry Function
 
