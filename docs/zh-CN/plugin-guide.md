@@ -67,8 +67,10 @@ plugins/
 
 - `permissions` 现在会在启动前执行校验，违反策略会拒绝启动 worker 进程。
 - `sandbox_profile` 也会在 spawn 前校验，不在允许列表内会被拒绝并返回策略原因。
-- `sandbox_profile=restricted` 会在进程 `exec` 前应用 POSIX `RLIMIT_CORE=0`（禁用 core dump）。
-- `sandbox_profile=strict` 在上述基础上，还会对 `RLIMIT_NOFILE` 施加上限。
+- `sandbox_profile=restricted` 依赖主机具备 POSIX preexec 与 `RLIMIT_CORE` capability；满足时会在 `exec` 前应用 `RLIMIT_CORE=0`（禁用 core dump）。
+- `sandbox_profile=strict` 需要更严格 capability（`restricted` 基线 + `RLIMIT_NOFILE` + seccomp 支持），并在上述基础上施加 open files 上限。
+- 缺失必需 capability 会 fail-closed 并返回结构化拒绝（`sandbox_capability_missing`）；seccomp 运行时不可用会返回 `sandbox_runtime_not_supported`。
+- 网关不会自动把 `strict` 降级为 `restricted`，需要在 manifest 中按主机能力显式声明回退策略。
 - 当前 enforcement 是 allowlist + 轻量 OS 级硬化，不是完整内核级沙箱策略。
 - `worker` 不会自动暴露 API 路由；它是后台受管进程模型。
 

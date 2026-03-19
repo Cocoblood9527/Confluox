@@ -67,8 +67,10 @@ Important:
 
 - `permissions` is enforced at startup: policy violations reject worker launch before process spawn.
 - `sandbox_profile` is also enforced before spawn; disallowed profiles are rejected with policy diagnostics.
-- `sandbox_profile=restricted` applies a POSIX RLIMIT core-dump block (`RLIMIT_CORE=0`) before exec.
-- `sandbox_profile=strict` applies the same core-dump block and additionally caps open files (`RLIMIT_NOFILE`).
+- `sandbox_profile=restricted` requires host sandbox capability for POSIX preexec and `RLIMIT_CORE`; when available it applies `RLIMIT_CORE=0` before exec.
+- `sandbox_profile=strict` requires stricter host capability (`restricted` baseline + `RLIMIT_NOFILE` + seccomp support) and applies the same core-dump block plus open-file capping.
+- missing required capability fails closed with structured rejection (`sandbox_capability_missing`); runtime seccomp unavailability fails closed as `sandbox_runtime_not_supported`.
+- the gateway does not auto-downgrade `strict` to `restricted`; choose an explicit fallback profile in plugin manifests per host limitations.
 - enforcement is allowlist-based plus lightweight OS hardening; it is not a full kernel sandbox policy engine.
 - `worker` plugins do not automatically expose HTTP routes.
 

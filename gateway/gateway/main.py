@@ -34,6 +34,7 @@ from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
 from gateway.resource_resolver import get_resource_path
 from gateway.routes import create_streaming_router, create_system_router
+from gateway.sandbox_capability import detect_host_sandbox_capabilities
 
 
 def bind_localhost_ephemeral_socket() -> tuple[socket.socket, int]:
@@ -240,7 +241,10 @@ def run_gateway(argv: list[str] | None = None) -> None:
     ready_path = Path(config.ready_file)
     ready_path.unlink(missing_ok=True)
 
-    process_manager = ProcessManager()
+    host_sandbox_capabilities = detect_host_sandbox_capabilities()
+    process_manager = ProcessManager(
+        sandbox_capabilities=host_sandbox_capabilities,
+    )
     server_ref: dict[str, uvicorn.Server | None] = {"server": None}
 
     def terminate_all() -> None:
