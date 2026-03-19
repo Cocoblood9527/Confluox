@@ -16,7 +16,8 @@ from gateway.process_manager import ProcessManager
 
 
 _OOP_SERVER_SCRIPT_PATH = Path(__file__).resolve().parent / "fixtures" / "oop_server.py"
-_OOP_BOOT_TIMEOUT_SECONDS = 5.0
+# macOS CI can be significantly slower when spawning repeated subprocesses.
+_OOP_BOOT_TIMEOUT_SECONDS = 20.0
 
 
 def _oop_server_command(
