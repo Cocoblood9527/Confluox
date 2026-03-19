@@ -82,6 +82,32 @@ def test_parse_config_out_of_process_boot_timeout_from_env_and_cli() -> None:
     assert config.api_out_of_process_boot_timeout_seconds == 1.75
 
 
+def test_parse_config_out_of_process_security_and_circuit_settings() -> None:
+    config = parse_config(
+        [
+            "--ready-file",
+            "/tmp/gateway.ready.json",
+            "--host-pid",
+            "9999",
+            "--api-out-of-process-max-active-plugins",
+            "7",
+            "--api-out-of-process-circuit-failure-threshold",
+            "4",
+            "--api-out-of-process-circuit-open-seconds",
+            "12.5",
+        ],
+        env={
+            "CONFLUOX_API_OOP_MAX_ACTIVE_PLUGINS": "5",
+            "CONFLUOX_API_OOP_CIRCUIT_FAILURE_THRESHOLD": "3",
+            "CONFLUOX_API_OOP_CIRCUIT_OPEN_SECONDS": "9.0",
+        },
+    )
+
+    assert config.api_out_of_process_max_active_plugins == 7
+    assert config.api_out_of_process_circuit_failure_threshold == 4
+    assert config.api_out_of_process_circuit_open_seconds == 12.5
+
+
 def test_parse_bootstrap_from_stdin_json_line() -> None:
     stream = io.StringIO(
         '{"data_dir":"/tmp/data","auth_token":"secret-token","allowed_origin":"https://app.local"}\n'

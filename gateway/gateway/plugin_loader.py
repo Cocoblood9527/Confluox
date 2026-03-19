@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import secrets
 import socket
 import time
 from dataclasses import dataclass
@@ -23,6 +24,13 @@ from gateway.plugin_policy import (
 
 _API_OUT_OF_PROCESS_HEALTH_PATH = "/__confluox/health"
 _PROXY_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_PLUGIN_AUTH_HEADER = "X-Confluox-Plugin-Auth"
+
+
+@dataclass
+class OutOfProcessProxyCircuitState:
+    failure_count: int = 0
+    circuit_open_until: float = 0.0
 
 
 @dataclass
@@ -115,8 +123,19 @@ def activate_plugin_descriptors(
     context: PluginContext,
     *,
     out_of_process_boot_timeout_seconds: float = 3.0,
+    out_of_process_max_active_plugins: int | None = None,
+    out_of_process_proxy_circuit_failure_threshold: int = 3,
+    out_of_process_proxy_circuit_open_seconds: float = 5.0,
 ) -> list[str]:
+    if out_of_process_max_active_plugins is not None and out_of_process_max_active_plugins < 1:
+        raise ValueError("api_oop_invalid_quota: max active plugins must be >= 1")
+    if out_of_process_proxy_circuit_failure_threshold < 1:
+        raise ValueError("api_oop_invalid_circuit_threshold: threshold must be >= 1")
+    if out_of_process_proxy_circuit_open_seconds <= 0:
+        raise ValueError("api_oop_invalid_circuit_open_seconds: value must be > 0")
+
     loaded: list[str] = []
+    out_of_process_active_count = 0
     for descriptor in descriptors:
         if not descriptor.trusted:
             raise ValueError(f"untrusted api plugin: {descriptor.name}")
@@ -125,11 +144,22 @@ def activate_plugin_descriptors(
             setup = getattr(module, descriptor.function_name)
             setup(context)
         elif descriptor.execution_mode == "out_of_process":
+            if (
+                out_of_process_max_active_plugins is not None
+                and out_of_process_active_count >= out_of_process_max_active_plugins
+            ):
+                raise ValueError(
+                    "api_oop_quota_exceeded: "
+                    f"max active out_of_process plugins is {out_of_process_max_active_plugins}"
+                )
             _activate_out_of_process_descriptor(
                 descriptor,
                 context=context,
                 boot_timeout_seconds=out_of_process_boot_timeout_seconds,
+                proxy_circuit_failure_threshold=out_of_process_proxy_circuit_failure_threshold,
+                proxy_circuit_open_seconds=out_of_process_proxy_circuit_open_seconds,
             )
+            out_of_process_active_count += 1
         else:
             raise ValueError(f"invalid api execution mode: {descriptor.execution_mode}")
         loaded.append(descriptor.name)
@@ -156,6 +186,8 @@ def _activate_out_of_process_descriptor(
     *,
     context: PluginContext,
     boot_timeout_seconds: float,
+    proxy_circuit_failure_threshold: int,
+    proxy_circuit_open_seconds: float,
 ) -> None:
     if context.process_manager is None:
         raise ValueError(
@@ -166,9 +198,11 @@ def _activate_out_of_process_descriptor(
 
     reservation, port = _bind_loopback_ephemeral_port()
     reservation.close()
+    auth_token = secrets.token_urlsafe(24)
     child_env = dict(os.environ)
     child_env["CONFLUOX_PLUGIN_PORT"] = str(port)
     child_env["CONFLUOX_PLUGIN_PREFIX"] = descriptor.route_prefix
+    child_env["CONFLUOX_PLUGIN_AUTH_TOKEN"] = auth_token
     process = context.process_manager.spawn(
         descriptor.command,
         env=child_env,
@@ -179,9 +213,17 @@ def _activate_out_of_process_descriptor(
         process=process,
         plugin_name=descriptor.name,
         port=port,
+        auth_token=auth_token,
         boot_timeout_seconds=boot_timeout_seconds,
     )
-    _register_proxy_route(context.app, descriptor=descriptor, port=port)
+    _register_proxy_route(
+        context.app,
+        descriptor=descriptor,
+        port=port,
+        auth_token=auth_token,
+        circuit_failure_threshold=proxy_circuit_failure_threshold,
+        circuit_open_seconds=proxy_circuit_open_seconds,
+    )
 
 
 def _bind_loopback_ephemeral_port() -> tuple[socket.socket, int]:
@@ -195,6 +237,7 @@ def _wait_for_out_of_process_health(
     process,
     plugin_name: str,
     port: int,
+    auth_token: str,
     boot_timeout_seconds: float,
 ) -> None:
     timeout_seconds = max(0.05, float(boot_timeout_seconds))
@@ -208,10 +251,20 @@ def _wait_for_out_of_process_health(
                 f"api_oop_process_exited: plugin '{plugin_name}' exited with code {process.returncode}"
             )
         try:
-            response = httpx.get(health_url, timeout=0.2)
+            response = httpx.get(
+                health_url,
+                headers={_PLUGIN_AUTH_HEADER: auth_token},
+                timeout=0.2,
+            )
             if response.status_code == 200:
                 return
+            if response.status_code == 401:
+                raise ValueError(
+                    f"api_oop_auth_failed: plugin '{plugin_name}' rejected host auth token"
+                )
             last_error = f"health status {response.status_code}"
+        except ValueError:
+            raise
         except Exception as err:  # pragma: no cover - depends on host/socket timing
             last_error = str(err)
         time.sleep(0.05)
@@ -222,16 +275,38 @@ def _wait_for_out_of_process_health(
     )
 
 
-def _register_proxy_route(app: FastAPI, *, descriptor: PluginDescriptor, port: int) -> None:
+def _register_proxy_route(
+    app: FastAPI,
+    *,
+    descriptor: PluginDescriptor,
+    port: int,
+    auth_token: str,
+    circuit_failure_threshold: int,
+    circuit_open_seconds: float,
+) -> None:
     router = APIRouter(prefix=descriptor.route_prefix)
+    circuit = OutOfProcessProxyCircuitState()
 
     @router.api_route("", methods=_PROXY_METHODS)
     @router.api_route("/{path:path}", methods=_PROXY_METHODS)
     async def proxy(request: Request, path: str = ""):
+        now = time.monotonic()
+        if circuit.circuit_open_until > now:
+            retry_after_seconds = max(0.0, circuit.circuit_open_until - now)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "api_oop_circuit_open",
+                    "plugin": descriptor.name,
+                    "retry_after_seconds": round(retry_after_seconds, 3),
+                },
+            )
+
         target_path = descriptor.route_prefix if path == "" else f"{descriptor.route_prefix}/{path}"
         target_url = f"http://127.0.0.1:{port}{target_path}"
         body = await request.body()
         headers = _filter_request_headers(request.headers)
+        headers[_PLUGIN_AUTH_HEADER] = auth_token
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -243,6 +318,19 @@ def _register_proxy_route(app: FastAPI, *, descriptor: PluginDescriptor, port: i
                     headers=headers,
                 )
         except Exception as err:
+            if _record_circuit_failure(
+                circuit,
+                failure_threshold=circuit_failure_threshold,
+                circuit_open_seconds=circuit_open_seconds,
+            ):
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": "api_oop_circuit_open",
+                        "plugin": descriptor.name,
+                        "detail": str(err),
+                    },
+                )
             return JSONResponse(
                 status_code=502,
                 content={
@@ -251,6 +339,15 @@ def _register_proxy_route(app: FastAPI, *, descriptor: PluginDescriptor, port: i
                     "detail": str(err),
                 },
             )
+
+        if upstream.status_code >= 500:
+            _record_circuit_failure(
+                circuit,
+                failure_threshold=circuit_failure_threshold,
+                circuit_open_seconds=circuit_open_seconds,
+            )
+        else:
+            _reset_circuit(circuit)
 
         return Response(
             content=upstream.content,
@@ -269,3 +366,21 @@ def _filter_request_headers(headers: Mapping[str, str]) -> dict[str, str]:
 def _filter_response_headers(headers: Mapping[str, str]) -> dict[str, str]:
     blocked = {"content-length", "connection", "transfer-encoding"}
     return {key: value for key, value in headers.items() if key.lower() not in blocked}
+
+
+def _record_circuit_failure(
+    circuit: OutOfProcessProxyCircuitState,
+    *,
+    failure_threshold: int,
+    circuit_open_seconds: float,
+) -> bool:
+    circuit.failure_count += 1
+    if circuit.failure_count < failure_threshold:
+        return False
+    circuit.circuit_open_until = time.monotonic() + circuit_open_seconds
+    return True
+
+
+def _reset_circuit(circuit: OutOfProcessProxyCircuitState) -> None:
+    circuit.failure_count = 0
+    circuit.circuit_open_until = 0.0

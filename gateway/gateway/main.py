@@ -239,6 +239,9 @@ def run_gateway(argv: list[str] | None = None) -> None:
         plugin_descriptors,
         plugin_context,
         out_of_process_boot_timeout_seconds=config.api_out_of_process_boot_timeout_seconds,
+        out_of_process_max_active_plugins=config.api_out_of_process_max_active_plugins,
+        out_of_process_proxy_circuit_failure_threshold=config.api_out_of_process_circuit_failure_threshold,
+        out_of_process_proxy_circuit_open_seconds=config.api_out_of_process_circuit_open_seconds,
     )
     worker_descriptors = discover_worker_plugins(plugins_dir)
     start_worker_plugins(

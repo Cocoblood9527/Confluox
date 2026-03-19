@@ -14,6 +14,9 @@ class Config:
     trusted_api_plugins: tuple[str, ...]
     allowed_api_execution_modes: tuple[str, ...]
     api_out_of_process_boot_timeout_seconds: float
+    api_out_of_process_max_active_plugins: int
+    api_out_of_process_circuit_failure_threshold: int
+    api_out_of_process_circuit_open_seconds: float
 
 
 def parse_config(
@@ -48,6 +51,21 @@ def parse_config(
         type=float,
         default=source_env.get("CONFLUOX_API_OOP_BOOT_TIMEOUT_SECONDS"),
     )
+    parser.add_argument(
+        "--api-out-of-process-max-active-plugins",
+        type=int,
+        default=source_env.get("CONFLUOX_API_OOP_MAX_ACTIVE_PLUGINS"),
+    )
+    parser.add_argument(
+        "--api-out-of-process-circuit-failure-threshold",
+        type=int,
+        default=source_env.get("CONFLUOX_API_OOP_CIRCUIT_FAILURE_THRESHOLD"),
+    )
+    parser.add_argument(
+        "--api-out-of-process-circuit-open-seconds",
+        type=float,
+        default=source_env.get("CONFLUOX_API_OOP_CIRCUIT_OPEN_SECONDS"),
+    )
 
     parsed = parser.parse_args(list(args or []))
 
@@ -70,6 +88,30 @@ def parse_config(
             parsed.api_out_of_process_boot_timeout_seconds,
             default=3.0,
         ),
+        api_out_of_process_max_active_plugins=_default_int(
+            parsed.api_out_of_process_max_active_plugins,
+            default=4,
+        ),
+        api_out_of_process_circuit_failure_threshold=_default_int(
+            parsed.api_out_of_process_circuit_failure_threshold,
+            default=3,
+        ),
+        api_out_of_process_circuit_open_seconds=_default_float(
+            parsed.api_out_of_process_circuit_open_seconds,
+            default=5.0,
+        ),
+    )
+    _validate_positive_int(
+        config.api_out_of_process_max_active_plugins,
+        "api_out_of_process_max_active_plugins",
+    )
+    _validate_positive_int(
+        config.api_out_of_process_circuit_failure_threshold,
+        "api_out_of_process_circuit_failure_threshold",
+    )
+    _validate_positive_float(
+        config.api_out_of_process_circuit_open_seconds,
+        "api_out_of_process_circuit_open_seconds",
     )
     return config
 
@@ -96,3 +138,19 @@ def _default_float(value: float | None, *, default: float) -> float:
     if value is None:
         return default
     return float(value)
+
+
+def _default_int(value: int | None, *, default: int) -> int:
+    if value is None:
+        return default
+    return int(value)
+
+
+def _validate_positive_int(value: int, name: str) -> None:
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1")
+
+
+def _validate_positive_float(value: float, name: str) -> None:
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0")

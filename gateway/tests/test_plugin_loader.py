@@ -15,7 +15,16 @@ from gateway.plugin_loader import (
 from gateway.process_manager import ProcessManager
 
 
-def _oop_server_command(*, startup_delay_seconds: float = 0.0) -> list[str]:
+def _oop_server_command(
+    *,
+    startup_delay_seconds: float = 0.0,
+    fixed_expected_token: str | None = None,
+) -> list[str]:
+    expected_token_source = (
+        repr(fixed_expected_token)
+        if fixed_expected_token is not None
+        else "os.environ['CONFLUOX_PLUGIN_AUTH_TOKEN']"
+    )
     script = textwrap.dedent(
         f"""
         import json
@@ -25,6 +34,7 @@ def _oop_server_command(*, startup_delay_seconds: float = 0.0) -> list[str]:
 
         port = int(os.environ["CONFLUOX_PLUGIN_PORT"])
         prefix = os.environ["CONFLUOX_PLUGIN_PREFIX"]
+        expected_token = {expected_token_source}
         time.sleep({startup_delay_seconds})
 
         class Handler(BaseHTTPRequestHandler):
@@ -33,6 +43,15 @@ def _oop_server_command(*, startup_delay_seconds: float = 0.0) -> list[str]:
 
             def do_GET(self):
                 if self.path == "/__confluox/health":
+                    token = self.headers.get("X-Confluox-Plugin-Auth", "")
+                    if token != expected_token:
+                        payload = json.dumps({{"error": "unauthorized"}}).encode("utf-8")
+                        self.send_response(401)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
                     payload = json.dumps({{"status": "ok"}}).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -42,6 +61,15 @@ def _oop_server_command(*, startup_delay_seconds: float = 0.0) -> list[str]:
                     return
 
                 if self.path == prefix or self.path.startswith(prefix + "/"):
+                    token = self.headers.get("X-Confluox-Plugin-Auth", "")
+                    if token != expected_token:
+                        payload = json.dumps({{"error": "unauthorized"}}).encode("utf-8")
+                        self.send_response(401)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
                     payload = json.dumps({{"plugin": "api_oop", "path": self.path}}).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
@@ -478,6 +506,96 @@ def test_activation_reports_process_crash_for_out_of_process_plugin(tmp_path) ->
         )
 
 
+def test_activation_reports_auth_failure_for_out_of_process_plugin(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop_auth_failure"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop_auth_failure",
+                "execution_mode": "out_of_process",
+                "command": _oop_server_command(fixed_expected_token="not-the-host-token"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+
+    with pytest.raises(ValueError, match="api_oop_auth_failed"):
+        activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=1.0,
+        )
+    manager.terminate_all(timeout=1.5)
+
+
+def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    for plugin_name in ("api_oop_one", "api_oop_two"):
+        plugin_dir = plugins_dir / plugin_name
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        (plugin_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "type": "api",
+                    "entry": "entry:setup",
+                    "name": plugin_name,
+                    "execution_mode": "out_of_process",
+                    "command": _oop_server_command(),
+                }
+            ),
+            encoding="utf-8",
+        )
+        (plugin_dir / "entry.py").write_text(
+            "def setup(context):\n    pass\n",
+            encoding="utf-8",
+        )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+
+    with pytest.raises(ValueError, match="api_oop_quota_exceeded"):
+        activate_plugin_descriptors(
+            descriptors,
+            context,
+            out_of_process_boot_timeout_seconds=1.0,
+            out_of_process_max_active_plugins=1,
+        )
+    manager.terminate_all(timeout=1.5)
+
+
 def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable(tmp_path) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop"
@@ -524,3 +642,58 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
     assert response.status_code == 502
     assert response.json()["error"] == "api_oop_upstream_unavailable"
     assert response.json()["plugin"] == "api_oop"
+
+
+def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop",
+                "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+    activate_plugin_descriptors(
+        descriptors,
+        context,
+        out_of_process_boot_timeout_seconds=1.5,
+        out_of_process_proxy_circuit_failure_threshold=2,
+        out_of_process_proxy_circuit_open_seconds=5.0,
+    )
+
+    manager.terminate_all(timeout=1.5)
+    client = TestClient(app)
+    first = client.get("/api/api_oop")
+    second = client.get("/api/api_oop")
+    third = client.get("/api/api_oop")
+
+    assert first.status_code == 502
+    assert second.status_code == 503
+    assert second.json()["error"] == "api_oop_circuit_open"
+    assert third.status_code == 503
+    assert third.json()["error"] == "api_oop_circuit_open"
