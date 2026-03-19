@@ -80,3 +80,35 @@ def test_spawn_worker_rejects_restrictive_profile_when_capabilities_missing() ->
             [sys.executable, "-c", "import time; time.sleep(60)"],
             sandbox_profile="restricted",
         )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="worker sandbox profile is POSIX-only")
+def test_spawn_worker_rejects_strict_profile_when_seccomp_runtime_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gateway.process_manager._has_seccomp_runtime",
+        lambda: False,
+        raising=False,
+    )
+    manager = ProcessManager(
+        sandbox_capabilities=SandboxCapabilities(
+            platform="linux",
+            supports_posix_preexec=True,
+            supports_rlimit_core=True,
+            supports_rlimit_nofile=True,
+            supports_seccomp=True,
+            supports_cgroup_v2=False,
+            supports_job_object=False,
+        )
+    )
+
+    try:
+        with pytest.raises(ValueError, match="worker_sandbox_not_supported"):
+            manager.spawn_worker(
+                "worker_strict",
+                [sys.executable, "-c", "print('strict')"],
+                sandbox_profile="strict",
+            )
+    finally:
+        manager.terminate_all(timeout=1.5)

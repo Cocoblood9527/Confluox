@@ -6,6 +6,7 @@ import pytest
 from gateway.plugin_policy import WorkerPermissionPolicy, WorkerSandboxProfilePolicy
 from gateway.plugin_runtime import discover_worker_plugins, start_worker_plugins
 from gateway.process_manager import ProcessManager
+from gateway.sandbox_capability import SandboxCapabilities
 
 
 def test_discover_worker_plugins_reads_command_manifest(tmp_path) -> None:
@@ -322,6 +323,67 @@ def test_start_worker_plugins_reports_sandbox_capability_missing(tmp_path) -> No
     assert statuses[0].pid is None
     assert [violation.code for violation in statuses[0].policy_violations] == [
         "sandbox_capability_missing"
+    ]
+    assert [violation.namespace for violation in statuses[0].policy_violations] == [
+        "sandbox_profile"
+    ]
+    assert [violation.entry for violation in statuses[0].policy_violations] == ["strict"]
+
+
+def test_start_worker_plugins_reports_strict_seccomp_runtime_missing(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gateway.process_manager._has_seccomp_runtime",
+        lambda: False,
+        raising=False,
+    )
+    plugins_dir = tmp_path / "plugins"
+    worker_dir = plugins_dir / "worker_strict_runtime_rejected"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "worker",
+                "name": "worker_strict_runtime_rejected",
+                "command": [sys.executable, "-c", "import time; time.sleep(60)"],
+                "sandbox_profile": "strict",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = ProcessManager(
+        sandbox_capabilities=SandboxCapabilities(
+            platform="linux",
+            supports_posix_preexec=True,
+            supports_rlimit_core=True,
+            supports_rlimit_nofile=True,
+            supports_seccomp=True,
+            supports_cgroup_v2=False,
+            supports_job_object=False,
+        )
+    )
+    descriptors = discover_worker_plugins(plugins_dir)
+    try:
+        statuses = start_worker_plugins(
+            descriptors,
+            process_manager=manager,
+            sandbox_profile_policy=WorkerSandboxProfilePolicy(
+                allowed_profiles=("restricted", "strict")
+            ),
+        )
+    finally:
+        manager.terminate_all(timeout=1.5)
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "worker_strict_runtime_rejected"
+    assert statuses[0].running is False
+    assert statuses[0].rejected is True
+    assert statuses[0].pid is None
+    assert [violation.code for violation in statuses[0].policy_violations] == [
+        "sandbox_runtime_not_supported"
     ]
     assert [violation.namespace for violation in statuses[0].policy_violations] == [
         "sandbox_profile"

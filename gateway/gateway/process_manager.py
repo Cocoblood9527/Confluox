@@ -151,6 +151,10 @@ def _build_worker_sandbox_preexec(
         return None
     if os.name == "nt":
         raise ValueError("worker_sandbox_not_supported: sandbox plan requires POSIX support")
+    if sandbox_plan.require_seccomp and not _has_seccomp_runtime():
+        raise ValueError(
+            "worker_sandbox_not_supported: seccomp runtime is unavailable"
+        )
 
     try:
         import resource
@@ -192,3 +196,11 @@ def _bounded_limit_value(current: int, *, maximum: int, resource_module) -> int:
     if current < 0 or (rlim_infinity is not None and current == rlim_infinity):
         return maximum
     return min(current, maximum)
+
+
+def _has_seccomp_runtime() -> bool:
+    try:
+        import seccomp  # type: ignore # noqa: F401
+    except Exception:
+        return False
+    return True
