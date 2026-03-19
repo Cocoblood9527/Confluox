@@ -48,6 +48,24 @@ def test_build_sandbox_spawn_plan_rejects_strict_when_capabilities_missing() -> 
         )
 
 
+def test_build_sandbox_spawn_plan_rejects_strict_without_seccomp() -> None:
+    with pytest.raises(ValueError, match="worker_sandbox_capability_missing"):
+        build_sandbox_spawn_plan(
+            "strict",
+            capabilities=_capabilities(supports_seccomp=False),
+        )
+
+
+def test_build_sandbox_spawn_plan_requires_seccomp_for_strict() -> None:
+    plan = build_sandbox_spawn_plan(
+        "strict",
+        capabilities=_capabilities(supports_seccomp=True),
+    )
+
+    assert plan is not None
+    assert plan.require_seccomp is True
+
+
 def test_build_sandbox_spawn_plan_rejects_unknown_profile() -> None:
     with pytest.raises(ValueError, match="worker_sandbox_profile_unknown"):
         build_sandbox_spawn_plan(
