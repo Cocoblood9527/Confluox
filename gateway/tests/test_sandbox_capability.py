@@ -53,3 +53,19 @@ def test_normalize_sandbox_capabilities_rejects_invalid_payload() -> None:
                 "supports_job_object": False,
             }
         )
+
+
+def test_normalize_sandbox_capabilities_rejects_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="unknown fields"):
+        normalize_sandbox_capabilities(
+            {
+                "platform": "linux",
+                "supports_posix_preexec": True,
+                "supports_rlimit_core": True,
+                "supports_rlimit_nofile": True,
+                "supports_seccomp": False,
+                "supports_cgroup_v2": False,
+                "supports_job_object": False,
+                "supports_extra_feature": True,
+            }
+        )

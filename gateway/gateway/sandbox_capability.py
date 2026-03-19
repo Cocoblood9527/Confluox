@@ -18,6 +18,19 @@ class SandboxCapabilities:
 
 
 def normalize_sandbox_capabilities(raw: Mapping[str, object]) -> SandboxCapabilities:
+    expected_fields = {
+        "platform",
+        "supports_posix_preexec",
+        "supports_rlimit_core",
+        "supports_rlimit_nofile",
+        "supports_seccomp",
+        "supports_cgroup_v2",
+        "supports_job_object",
+    }
+    unknown_fields = sorted(set(raw.keys()) - expected_fields)
+    if unknown_fields:
+        raise ValueError(f"unknown fields in sandbox capabilities: {', '.join(unknown_fields)}")
+
     platform = raw.get("platform")
     if not isinstance(platform, str) or platform == "":
         raise ValueError("platform must be non-empty string")
