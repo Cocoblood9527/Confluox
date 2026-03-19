@@ -10,7 +10,7 @@ The repository now supports two plugin types:
 Compatibility notes:
 
 - Existing `api` plugins continue to work without migration changes.
-- `worker` currently means managed process start/track/stop only; it does **not** mean process sandbox isolation is already implemented.
+- `worker` now includes a minimal OS-level hardening path for supported `sandbox_profile` values on POSIX hosts.
 - `api` plugin loading now includes a trust gate: untrusted plugin sources are blocked by default unless explicitly trusted.
 
 ## Plugin Folder Layout
@@ -67,7 +67,9 @@ Important:
 
 - `permissions` is enforced at startup: policy violations reject worker launch before process spawn.
 - `sandbox_profile` is also enforced before spawn; disallowed profiles are rejected with policy diagnostics.
-- enforcement is allowlist-based and is not a full OS sandbox policy engine.
+- `sandbox_profile=restricted` applies a POSIX RLIMIT core-dump block (`RLIMIT_CORE=0`) before exec.
+- `sandbox_profile=strict` applies the same core-dump block and additionally caps open files (`RLIMIT_NOFILE`).
+- enforcement is allowlist-based plus lightweight OS hardening; it is not a full kernel sandbox policy engine.
 - `worker` plugins do not automatically expose HTTP routes.
 
 ## API Trust Policy

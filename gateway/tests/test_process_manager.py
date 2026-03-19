@@ -1,4 +1,8 @@
+import json
+import os
 import sys
+
+import pytest
 
 from gateway.process_manager import ProcessManager
 
@@ -29,3 +33,28 @@ def test_spawn_worker_tracks_named_status() -> None:
     manager.terminate_all(timeout=1.5)
     statuses_after_shutdown = manager.get_worker_statuses()
     assert statuses_after_shutdown[0].running is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="worker sandbox profile is POSIX-only")
+def test_spawn_worker_restricted_profile_disables_core_dumps(tmp_path) -> None:
+    output_path = tmp_path / "limits.json"
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, resource; "
+            f"open({repr(str(output_path))}, 'w', encoding='utf-8').write("
+            "json.dumps({'core': list(resource.getrlimit(resource.RLIMIT_CORE))}))"
+        ),
+    ]
+    manager = ProcessManager()
+    process = manager.spawn_worker(
+        "worker_restricted",
+        command,
+        sandbox_profile="restricted",
+    )
+    process.wait(timeout=2.0)
+    manager.terminate_all(timeout=1.5)
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["core"][0] == 0

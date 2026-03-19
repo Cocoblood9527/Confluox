@@ -10,7 +10,7 @@
 兼容性说明：
 
 - 现有 `api` 插件无需修改即可继续工作。
-- `worker` 当前只覆盖“受管进程启动/登记/关闭”，不等于已经提供进程沙箱隔离。
+- `worker` 现在在 POSIX 平台上提供了最小 OS 级硬化路径（基于 `sandbox_profile`）。
 - `api` 插件加载现在带有信任策略：不受信任来源默认会被拒绝，除非显式信任。
 
 ## 插件目录结构
@@ -67,7 +67,9 @@ plugins/
 
 - `permissions` 现在会在启动前执行校验，违反策略会拒绝启动 worker 进程。
 - `sandbox_profile` 也会在 spawn 前校验，不在允许列表内会被拒绝并返回策略原因。
-- 当前 enforcement 是 allowlist 启动门禁，不是完整的操作系统级沙箱。
+- `sandbox_profile=restricted` 会在进程 `exec` 前应用 POSIX `RLIMIT_CORE=0`（禁用 core dump）。
+- `sandbox_profile=strict` 在上述基础上，还会对 `RLIMIT_NOFILE` 施加上限。
+- 当前 enforcement 是 allowlist + 轻量 OS 级硬化，不是完整内核级沙箱策略。
 - `worker` 不会自动暴露 API 路由；它是后台受管进程模型。
 
 ## API 信任策略

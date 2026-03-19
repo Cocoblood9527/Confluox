@@ -125,7 +125,55 @@ def start_worker_plugins(
                 )
                 continue
 
-        process = process_manager.spawn_worker(descriptor.name, descriptor.command)
+        try:
+            process = process_manager.spawn_worker(
+                descriptor.name,
+                descriptor.command,
+                sandbox_profile=descriptor.sandbox_profile,
+            )
+        except ValueError as err:
+            message = str(err)
+            if message.startswith("worker_sandbox_not_supported"):
+                statuses.append(
+                    WorkerRuntimeStatus(
+                        name=descriptor.name,
+                        pid=None,
+                        running=False,
+                        command=list(descriptor.command),
+                        runtime=descriptor.runtime,
+                        rejected=True,
+                        policy_violations=[
+                            PermissionPolicyViolation(
+                                code="sandbox_runtime_not_supported",
+                                namespace="sandbox_profile",
+                                entry=descriptor.sandbox_profile,
+                                message=message,
+                            )
+                        ],
+                    )
+                )
+                continue
+            if message.startswith("worker_sandbox_unknown_profile"):
+                statuses.append(
+                    WorkerRuntimeStatus(
+                        name=descriptor.name,
+                        pid=None,
+                        running=False,
+                        command=list(descriptor.command),
+                        runtime=descriptor.runtime,
+                        rejected=True,
+                        policy_violations=[
+                            PermissionPolicyViolation(
+                                code="sandbox_profile_unknown",
+                                namespace="sandbox_profile",
+                                entry=descriptor.sandbox_profile,
+                                message=message,
+                            )
+                        ],
+                    )
+                )
+                continue
+            raise
         statuses.append(
             WorkerRuntimeStatus(
                 name=descriptor.name,

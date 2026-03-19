@@ -89,7 +89,13 @@ def test_start_worker_plugins_rejects_policy_violations_without_spawn(tmp_path) 
         def __init__(self) -> None:
             self.calls: list[tuple[str, list[str]]] = []
 
-        def spawn_worker(self, name: str, args: list[str]):
+        def spawn_worker(
+            self,
+            name: str,
+            args: list[str],
+            *,
+            sandbox_profile: str | None = None,
+        ):
             self.calls.append((name, list(args)))
             raise AssertionError("spawn should not be called for rejected worker")
 
@@ -130,7 +136,13 @@ def test_start_worker_plugins_rejects_sandbox_profile_without_spawn(tmp_path) ->
         def __init__(self) -> None:
             self.calls: list[tuple[str, list[str]]] = []
 
-        def spawn_worker(self, name: str, args: list[str]):
+        def spawn_worker(
+            self,
+            name: str,
+            args: list[str],
+            *,
+            sandbox_profile: str | None = None,
+        ):
             self.calls.append((name, list(args)))
             raise AssertionError("spawn should not be called for rejected worker")
 
@@ -166,3 +178,105 @@ def test_start_worker_plugins_rejects_sandbox_profile_without_spawn(tmp_path) ->
     assert [violation.namespace for violation in statuses[0].policy_violations] == ["sandbox_profile"]
     assert [violation.entry for violation in statuses[0].policy_violations] == ["strict"]
     assert manager.calls == []
+
+
+def test_start_worker_plugins_passes_sandbox_profile_to_process_manager(tmp_path) -> None:
+    class FakeProcess:
+        pid = 12345
+
+        def poll(self) -> None:
+            return None
+
+    class RecordingProcessManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, list[str], str | None]] = []
+
+        def spawn_worker(
+            self,
+            name: str,
+            args: list[str],
+            *,
+            sandbox_profile: str | None = None,
+        ) -> FakeProcess:
+            self.calls.append((name, list(args), sandbox_profile))
+            return FakeProcess()
+
+    plugins_dir = tmp_path / "plugins"
+    worker_dir = plugins_dir / "worker_sandbox_passthrough"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "worker",
+                "name": "worker_sandbox_passthrough",
+                "command": [sys.executable, "-c", "import time; time.sleep(60)"],
+                "sandbox_profile": "restricted",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = RecordingProcessManager()
+    descriptors = discover_worker_plugins(plugins_dir)
+    statuses = start_worker_plugins(
+        descriptors,
+        process_manager=manager,
+        sandbox_profile_policy=WorkerSandboxProfilePolicy(allowed_profiles=("restricted",)),
+    )
+
+    assert len(statuses) == 1
+    assert statuses[0].rejected is False
+    assert manager.calls == [
+        (
+            "worker_sandbox_passthrough",
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            "restricted",
+        )
+    ]
+
+
+def test_start_worker_plugins_reports_sandbox_runtime_not_supported(tmp_path) -> None:
+    class RecordingProcessManager:
+        def spawn_worker(
+            self,
+            name: str,
+            args: list[str],
+            *,
+            sandbox_profile: str | None = None,
+        ):
+            raise ValueError("worker_sandbox_not_supported: sandbox profiles require POSIX support")
+
+    plugins_dir = tmp_path / "plugins"
+    worker_dir = plugins_dir / "worker_runtime_rejected"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "worker",
+                "name": "worker_runtime_rejected",
+                "command": [sys.executable, "-c", "import time; time.sleep(60)"],
+                "sandbox_profile": "restricted",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    descriptors = discover_worker_plugins(plugins_dir)
+    statuses = start_worker_plugins(
+        descriptors,
+        process_manager=RecordingProcessManager(),
+        sandbox_profile_policy=WorkerSandboxProfilePolicy(allowed_profiles=("restricted",)),
+    )
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "worker_runtime_rejected"
+    assert statuses[0].running is False
+    assert statuses[0].rejected is True
+    assert statuses[0].pid is None
+    assert [violation.code for violation in statuses[0].policy_violations] == [
+        "sandbox_runtime_not_supported"
+    ]
+    assert [violation.namespace for violation in statuses[0].policy_violations] == [
+        "sandbox_profile"
+    ]
+    assert [violation.entry for violation in statuses[0].policy_violations] == ["restricted"]
