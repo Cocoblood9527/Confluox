@@ -150,11 +150,12 @@ pub fn get_gateway_diagnostics(
             .events
             .into_iter()
             .map(|event| {
-                format!(
+                let line = format!(
                     "[{}] {}",
                     event_kind_name(&event.kind),
                     event.message
-                )
+                );
+                redact_sensitive_text(&line)
             })
             .collect(),
     }
@@ -167,6 +168,50 @@ fn event_kind_name(kind: &GatewayDiagnosticEventKind) -> &'static str {
         GatewayDiagnosticEventKind::StartupStatus => "startup",
         GatewayDiagnosticEventKind::Shutdown => "shutdown",
     }
+}
+
+fn redact_sensitive_text(line: &str) -> String {
+    if let Some(redacted) = redact_header_value(line, "x-confluox-plugin-auth:") {
+        return redacted;
+    }
+    if let Some(redacted) = redact_bearer_token(line) {
+        return redacted;
+    }
+    if let Some(redacted) = redact_header_value(line, "authorization:") {
+        return redacted;
+    }
+    line.to_string()
+}
+
+fn redact_header_value(line: &str, header_label: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    let start = lower.find(header_label)?;
+    let header_end = start + header_label.len();
+    let prefix = line[..header_end].to_string();
+    Some(format!("{prefix} [REDACTED]"))
+}
+
+fn redact_bearer_token(line: &str) -> Option<String> {
+    let lower = line.to_lowercase();
+    let prefix = "bearer ";
+    let start = lower.find(prefix)?;
+    let token_start = start + prefix.len();
+    let token_end = line[token_start..]
+        .char_indices()
+        .find_map(|(index, ch)| {
+            if ch.is_whitespace() || ch == ',' || ch == ';' {
+                Some(token_start + index)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| line.len());
+    if token_end <= token_start {
+        return None;
+    }
+    let mut output = line.to_string();
+    output.replace_range(token_start..token_end, "[REDACTED]");
+    Some(output)
 }
 
 #[cfg(test)]
@@ -236,5 +281,29 @@ mod tests {
 
         let snapshot = diagnostics.snapshot();
         assert_eq!(collect_messages(&snapshot), vec!["67890", "ab", "XYZ"]);
+    }
+
+    #[test]
+    fn redacts_bearer_like_tokens_in_response_lines() {
+        let line = "[stderr] Authorization: Bearer secret-token-value";
+        let redacted = redact_sensitive_text(line);
+
+        assert_eq!(redacted, "[stderr] Authorization: Bearer [REDACTED]");
+    }
+
+    #[test]
+    fn redacts_auth_headers_in_response_lines() {
+        let line = "[stdout] X-Confluox-Plugin-Auth: plugin-secret-token";
+        let redacted = redact_sensitive_text(line);
+
+        assert_eq!(redacted, "[stdout] X-Confluox-Plugin-Auth: [REDACTED]");
+    }
+
+    #[test]
+    fn keeps_non_sensitive_lines_unchanged() {
+        let line = "[stdout] plugin startup complete";
+        let redacted = redact_sensitive_text(line);
+
+        assert_eq!(redacted, line);
     }
 }
