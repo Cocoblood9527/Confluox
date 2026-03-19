@@ -57,9 +57,20 @@ cargo tauri dev
 如果一切正常，桌面窗口里应该能看到：
 
 - gateway base URL
-- auth token
 - gateway health 状态
 - example plugin 返回值
+
+## Gateway Token 生命周期
+
+- 桌面宿主现在会签发带 scope 的短时 token（`scope: gateway-api`）。
+- 当前端收到 `401` 且错误码为 `auth_token_expired` 时，会自动触发一次 token 刷新并重试。
+- 刷新流程仅在本地执行，通过 Tauri 命令 `refresh_gateway_auth_token` 完成。
+
+## Diagnostics 脱敏
+
+- 前端读取到的网关 diagnostics 默认已做脱敏处理。
+- Bearer 类 token 与鉴权头值会被统一替换为 `[REDACTED]`。
+- 非敏感日志内容保持原样返回。
 
 ## 开发态运行原理
 

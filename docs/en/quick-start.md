@@ -57,9 +57,20 @@ cargo tauri dev
 If everything is working, the desktop window should show:
 
 - gateway base URL
-- auth token
 - gateway health status
 - example plugin response
+
+## Gateway Token Lifecycle
+
+- The desktop host now issues scoped short-lived gateway tokens (`scope: gateway-api`).
+- The frontend automatically refreshes the token once when it receives `401` with `auth_token_expired`.
+- Token refresh is local-only and handled through a Tauri command (`refresh_gateway_auth_token`).
+
+## Diagnostics Redaction
+
+- Gateway diagnostics returned to the frontend are redacted by default.
+- Bearer-like values and auth header values are masked as `[REDACTED]`.
+- Non-sensitive log lines are preserved unchanged.
 
 ## How Development Mode Works
 
