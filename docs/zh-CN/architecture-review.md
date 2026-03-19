@@ -20,6 +20,15 @@
 - 改进建议是否合理
 - 更稳妥的落地顺序是什么
 
+## 更新说明（2026-03-19）
+
+本文最初版本形成于早期实现阶段。随着 `v0.2.0` ~ `v0.2.3` 的连续交付，部分高优先级问题已经落地修复或显著缓解。
+
+为避免“历史问题描述”和“当前代码状态”混淆，本文采用双视角：
+
+- 历史快照：保留原始审查判断与改造建议，作为决策背景。
+- 当前状态：补充 `main` 分支（`v0.2.3-phase2-hardening-complete`）的实现回顾与剩余缺口。
+
 ## 审查范围
 
 本次审查重点覆盖以下实现：
@@ -42,7 +51,7 @@
 - `docs/zh-CN/plugin-guide.md`
 - `README.zh-CN.md`
 
-## 总体结论
+## 总体结论（历史快照）
 
 8 点判断可以分成三类：
 
@@ -57,7 +66,7 @@
 - 插件加载边界与隔离策略
 - 宿主与网关之间更稳健的保活机制
 
-## 风险分级总表
+## 风险分级总表（历史快照）
 
 | 项目 | 结论 | 当前风险级别 | 建议优先级 |
 | --- | --- | --- | --- |
@@ -69,6 +78,29 @@
 | 6. 轮询保活机制 | 明确成立 | 中 | 中 |
 | 7. 本地安全机制 | 部分成立 | 中高 | 高 |
 | 8. 插件生态局限性 | 明确成立 | 中 | 中高 |
+
+## 当前状态回顾（2026-03-19，v0.2.3）
+
+> 基准：`main` 分支，标签 `v0.2.3-phase2-hardening-complete`
+
+| 项目 | 当前状态 | 回顾 |
+| --- | --- | --- |
+| 1. 通信机制效率瓶颈 | 部分解决 | 已有 SSE 流式链路与前端解析（含 LF/CRLF 分帧）；主链路仍是 localhost HTTP。 |
+| 2. 插件隔离与容错 | 部分解决 | 已有 worker 权限/沙箱 profile 策略、API trust gate、API out-of-process 执行；仍非完整内核级沙箱。 |
+| 3. 冷启动与包体积 | 部分解决 | 已有 Nuitka/PyInstaller 双轨与优先级选择；插件仍在启动路径激活，未完成全面懒加载。 |
+| 4. 日志与可观测性 | 基本解决 | Rust 已接管 Python stdout/stderr，提供 diagnostics 快照并落盘。 |
+| 5. 生命周期死锁风险 | 基本解决 | 已有优雅关闭 + 超时强杀；仍可继续增强极端阻塞场景观测。 |
+| 6. 保活机制 | 已解决（原问题） | 已从 PID 轮询迁移到 stdin EOF 事件触发退出。 |
+| 7. 本地安全机制 | 部分解决 | token 已从 argv 改为 bootstrap stdin 传递，前端不再直显 token；localhost 攻击面仍需持续收敛。 |
+| 8. 插件生态局限性 | 部分解决 | 插件类型从仅 `api` 扩展到 `api + worker`；距离完整通用插件平台仍有差距。 |
+
+### 关键落地点（对应当前代码）
+
+- 宿主标准流接管与诊断：`src-tauri/src/gateway.rs`、`src-tauri/src/gateway_diagnostics.rs`
+- bootstrap stdin 传递与 EOF 保活：`src-tauri/src/gateway.rs`、`gateway/gateway/bootstrap.py`、`gateway/gateway/host_liveness.py`
+- worker 策略与 OS 级硬化钩子：`gateway/gateway/plugin_runtime.py`、`gateway/gateway/process_manager.py`
+- API out-of-process 合约与隔离：`gateway/gateway/plugin_loader.py`
+- 文档边界更新：`docs/zh-CN/plugin-guide.md`、`docs/en/plugin-guide.md`
 
 ## 逐项审查
 
