@@ -99,7 +99,8 @@ plugins/
 当前行为：
 
 - 插件发现阶段会按 host allowlist 校验 execution mode
-- 激活阶段会拉起 `out_of_process` 插件进程并执行健康检查握手
+- 启动阶段仅做 descriptor 发现；API 插件默认采用“首个命中请求再激活”的 lazy activation
+- 首次访问 `/api/<plugin_name>` 时触发激活（`in_process` 执行 setup；`out_of_process` 拉起进程并做健康检查握手）
 - 请求会代理到 `/api/<plugin_name>` 前缀
 - 启动失败会返回显式诊断（`api_oop_boot_timeout`、`api_oop_process_exited`）
 - 代理运行时失败会返回结构化 `502` 响应（`api_oop_upstream_unavailable`）
@@ -128,6 +129,13 @@ Out-of-process 插件运行时契约：
 - 鉴权握手失败：`api_oop_auth_failed`
 - 激活配额超限：`api_oop_quota_exceeded`
 - 熔断开启回退：`api_oop_circuit_open`
+- 激活状态快照端点：`GET /api/system/plugin-activation`
+- 激活失败状态会保留，并以稳定 `error_code` / `error_message` 对外可见
+
+预热建议：
+
+- 如果你的场景需要在用户流量前提前热启动插件，可在启动后主动请求插件健康或业务路由（例如 `GET /api/<plugin_name>`）
+- 预热是可选项；默认契约仍是首请求 lazy activation
 
 ## 入口函数
 

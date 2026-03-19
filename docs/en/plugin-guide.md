@@ -99,7 +99,8 @@ When `execution_mode` is `out_of_process`, `command` is required in manifest:
 Current behavior:
 
 - discovery enforces host allowlist for api execution modes
-- activation launches `out_of_process` plugin command and performs health-check handshake
+- startup performs descriptor discovery only; API plugins default to lazy activation on first matching request
+- first request to `/api/<plugin_name>` triggers activation (`in_process` setup or `out_of_process` spawn + health-check handshake)
 - requests are proxied under `/api/<plugin_name>`
 - startup failures return explicit diagnostics (`api_oop_boot_timeout`, `api_oop_process_exited`)
 - proxy runtime failures return structured `502` payloads (`api_oop_upstream_unavailable`)
@@ -128,6 +129,13 @@ Additional diagnostics:
 - auth handshake rejected: `api_oop_auth_failed`
 - activation quota exceeded: `api_oop_quota_exceeded`
 - circuit open fallback: `api_oop_circuit_open`
+- activation state snapshot endpoint: `GET /api/system/plugin-activation`
+- failed activation state is retained and exposed with stable `error_code` and `error_message`
+
+Warmup guidance:
+
+- if your workflow needs plugin routes hot before user traffic, issue a startup warmup request to plugin health/business endpoints (for example, `GET /api/<plugin_name>`)
+- warmup is optional; default contract is lazy activation on first request
 
 ## Entry Function
 
