@@ -87,6 +87,9 @@ def create_app(
     *,
     on_shutdown: Callable[[], None] | None = None,
     auth_token: str | None = None,
+    auth_token_scope: str | None = None,
+    auth_token_ttl_seconds: int | None = None,
+    auth_token_issued_at: int | None = None,
     allowed_origin: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Confluox Gateway", version="0.1.0")
@@ -102,7 +105,13 @@ def create_app(
             allow_headers=["*"],
         )
     if auth_token is not None:
-        app.add_middleware(BearerAuthMiddleware, token=auth_token)
+        app.add_middleware(
+            BearerAuthMiddleware,
+            token=auth_token,
+            token_scope=auth_token_scope,
+            token_ttl_seconds=auth_token_ttl_seconds,
+            token_issued_at=auth_token_issued_at,
+        )
     return app
 
 
@@ -247,6 +256,9 @@ def run_gateway(argv: list[str] | None = None) -> None:
     app = create_app(
         on_shutdown=on_shutdown,
         auth_token=bootstrap.auth_token,
+        auth_token_scope=bootstrap.auth_token_scope,
+        auth_token_ttl_seconds=bootstrap.auth_token_ttl_seconds,
+        auth_token_issued_at=bootstrap.auth_token_issued_at,
         allowed_origin=bootstrap.allowed_origin,
     )
 

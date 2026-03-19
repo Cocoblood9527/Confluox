@@ -136,3 +136,18 @@ def test_bootstrap_rejects_blank_payload() -> None:
     stream = io.StringIO("\n")
     with pytest.raises(ValueError, match="bootstrap payload is required"):
         read_bootstrap_config(stream)
+
+
+def test_bootstrap_parses_auth_token_metadata_contract() -> None:
+    stream = io.StringIO(
+        (
+            '{"data_dir":"/tmp/data","auth_token":"secret-token","allowed_origin":"https://app.local",'
+            '"auth_token_scope":"gateway-api","auth_token_ttl_seconds":300,"auth_token_issued_at":1700000000}\n'
+        )
+    )
+
+    bootstrap = read_bootstrap_config(stream)
+
+    assert bootstrap.auth_token_scope == "gateway-api"
+    assert bootstrap.auth_token_ttl_seconds == 300
+    assert bootstrap.auth_token_issued_at == 1700000000
