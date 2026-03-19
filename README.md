@@ -184,6 +184,7 @@ cargo tauri build
 - [Quick Start](docs/en/quick-start.md)
 - [Plugin Guide](docs/en/plugin-guide.md)
 - [Integration Guide](docs/en/integration-guide.md)
+- [Case Studies](docs/en/case-studies.md)
 - [Contributing](CONTRIBUTING.md)
 - [中文文档入口](README.zh-CN.md)
 
