@@ -315,8 +315,9 @@ def run_gateway(argv: list[str] | None = None) -> None:
     host_watch_thread = threading.Thread(
         target=start_host_liveness_watch,
         kwargs={
-            "stream": sys.stdin,
+            "host_pid": config.host_pid,
             "on_host_exit": on_shutdown,
+            "poll_interval": 1.0,
         },
         daemon=True,
     )
