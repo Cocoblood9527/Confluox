@@ -1,0 +1,11 @@
+{
+  "type": "worker",
+  "name": "index_worker",
+  "runtime": "python",
+  "permissions": {
+    "fs": ["read:/tmp"],
+    "network": ["loopback"]
+  },
+  "sandbox_profile": "restricted",
+  "command": ["python3", "-m", "main"]
+}

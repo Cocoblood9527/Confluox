@@ -1,0 +1,7 @@
+{
+  "type": "api",
+  "name": "whisper_app",
+  "entry": "entry:setup",
+  "execution_mode": "out_of_process",
+  "command": ["python3", "-m", "entry"]
+}

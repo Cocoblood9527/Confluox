@@ -193,4 +193,5 @@ const result = await apiGet('/api/your-plugin/ping')
 
 - [快速开始](quick-start.md)
 - [开源项目接入指南](integration-guide.md)
+- [实例说明](实例说明.md)
 - [English Plugin Guide](../en/plugin-guide.md)

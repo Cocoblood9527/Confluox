@@ -39,6 +39,8 @@ Recommended manifest:
 }
 ```
 
+Template path: `plugins/examples/whisper_oop_template`
+
 Backend contract (minimal shape):
 
 ```python
@@ -113,6 +115,8 @@ Recommended manifest:
 }
 ```
 
+Template path: `plugins/examples/index_worker_template`
+
 Implementation pattern:
 
 - let the worker run scan/index/queue tasks in the background
@@ -136,6 +140,8 @@ Recommended manifest:
   "entry": "entry:setup"
 }
 ```
+
+Template path: `plugins/examples/md_builder_template`
 
 Backend shape:
 
@@ -173,6 +179,12 @@ Then build the desktop bundle:
 
 ```bash
 cargo tauri build
+```
+
+Case-doc and template smoke check:
+
+```bash
+PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_case_study_assets.py -q
 ```
 
 ## Related Guides

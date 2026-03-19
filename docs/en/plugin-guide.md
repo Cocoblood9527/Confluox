@@ -193,4 +193,5 @@ The client automatically resolves the gateway base URL and includes the bearer t
 
 - [Quick Start](quick-start.md)
 - [Integration Guide](integration-guide.md)
+- [Case Studies](case-studies.md)
 - [中文插件指南](../zh-CN/plugin-guide.md)

@@ -28,6 +28,20 @@ jobs:
           reporter: github-check
           fail_level: error
 
+  docs-consistency:
+    name: docs-consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install gateway dev dependencies
+        run: python -m pip install -e gateway[dev]
+      - name: Verify case-study docs and template assets
+        run: PYTHONPATH=$PWD/gateway python -m pytest gateway/tests/test_case_study_assets.py -q
+
   dual-track-matrix:
     name: dual-track-${{ matrix.os }}
     runs-on: ${{ matrix.os }}

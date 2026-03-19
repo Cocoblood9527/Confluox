@@ -82,4 +82,5 @@ If the answer to the first question is yes, start with an API plugin.
 
 - [Quick Start](quick-start.md)
 - [Plugin Guide](plugin-guide.md)
+- [Case Studies](case-studies.md)
 - [中文接入指南](../zh-CN/integration-guide.md)
