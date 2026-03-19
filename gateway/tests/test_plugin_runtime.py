@@ -280,3 +280,52 @@ def test_start_worker_plugins_reports_sandbox_runtime_not_supported(tmp_path) ->
         "sandbox_profile"
     ]
     assert [violation.entry for violation in statuses[0].policy_violations] == ["restricted"]
+
+
+def test_start_worker_plugins_reports_sandbox_capability_missing(tmp_path) -> None:
+    class RecordingProcessManager:
+        def spawn_worker(
+            self,
+            name: str,
+            args: list[str],
+            *,
+            sandbox_profile: str | None = None,
+        ):
+            raise ValueError(
+                "worker_sandbox_capability_missing: profile 'strict' requires supports_rlimit_nofile"
+            )
+
+    plugins_dir = tmp_path / "plugins"
+    worker_dir = plugins_dir / "worker_capability_missing"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "worker",
+                "name": "worker_capability_missing",
+                "command": [sys.executable, "-c", "import time; time.sleep(60)"],
+                "sandbox_profile": "strict",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    descriptors = discover_worker_plugins(plugins_dir)
+    statuses = start_worker_plugins(
+        descriptors,
+        process_manager=RecordingProcessManager(),
+        sandbox_profile_policy=WorkerSandboxProfilePolicy(allowed_profiles=("restricted", "strict")),
+    )
+
+    assert len(statuses) == 1
+    assert statuses[0].name == "worker_capability_missing"
+    assert statuses[0].running is False
+    assert statuses[0].rejected is True
+    assert statuses[0].pid is None
+    assert [violation.code for violation in statuses[0].policy_violations] == [
+        "sandbox_capability_missing"
+    ]
+    assert [violation.namespace for violation in statuses[0].policy_violations] == [
+        "sandbox_profile"
+    ]
+    assert [violation.entry for violation in statuses[0].policy_violations] == ["strict"]

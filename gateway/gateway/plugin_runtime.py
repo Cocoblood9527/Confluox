@@ -153,7 +153,29 @@ def start_worker_plugins(
                     )
                 )
                 continue
-            if message.startswith("worker_sandbox_unknown_profile"):
+            if message.startswith("worker_sandbox_capability_missing"):
+                statuses.append(
+                    WorkerRuntimeStatus(
+                        name=descriptor.name,
+                        pid=None,
+                        running=False,
+                        command=list(descriptor.command),
+                        runtime=descriptor.runtime,
+                        rejected=True,
+                        policy_violations=[
+                            PermissionPolicyViolation(
+                                code="sandbox_capability_missing",
+                                namespace="sandbox_profile",
+                                entry=descriptor.sandbox_profile,
+                                message=message,
+                            )
+                        ],
+                    )
+                )
+                continue
+            if message.startswith("worker_sandbox_unknown_profile") or message.startswith(
+                "worker_sandbox_profile_unknown"
+            ):
                 statuses.append(
                     WorkerRuntimeStatus(
                         name=descriptor.name,

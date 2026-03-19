@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from collections.abc import Callable, Sequence
 from typing import Mapping
 
+from gateway.sandbox_capability import SandboxCapabilities, detect_host_sandbox_capabilities
+from gateway.sandbox_executor import SandboxSpawnPlan, build_sandbox_spawn_plan
+
 
 @dataclass(frozen=True)
 class WorkerProcessStatus:
@@ -16,9 +19,18 @@ class WorkerProcessStatus:
 
 
 class ProcessManager:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox_capabilities: SandboxCapabilities | None = None,
+    ) -> None:
         self._processes: list[subprocess.Popen[bytes]] = []
         self._workers: dict[str, subprocess.Popen[bytes]] = {}
+        self._sandbox_capabilities = (
+            detect_host_sandbox_capabilities()
+            if sandbox_capabilities is None
+            else sandbox_capabilities
+        )
 
     def spawn(
         self,
@@ -60,12 +72,22 @@ class ProcessManager:
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
         sandbox_profile: str | None = None,
+        sandbox_capabilities: SandboxCapabilities | None = None,
     ) -> subprocess.Popen[bytes]:
+        capabilities = (
+            self._sandbox_capabilities
+            if sandbox_capabilities is None
+            else sandbox_capabilities
+        )
+        sandbox_plan = build_sandbox_spawn_plan(
+            sandbox_profile,
+            capabilities=capabilities,
+        )
         process = self.spawn(
             args,
             env=env,
             cwd=cwd,
-            preexec_fn=_build_worker_sandbox_preexec(sandbox_profile),
+            preexec_fn=_build_worker_sandbox_preexec(sandbox_plan),
         )
         self._workers[name] = process
         return process
@@ -123,18 +145,12 @@ class ProcessManager:
 
 
 def _build_worker_sandbox_preexec(
-    sandbox_profile: str | None,
+    sandbox_plan: SandboxSpawnPlan | None,
 ) -> Callable[[], None] | None:
-    if sandbox_profile in (None, "none"):
+    if sandbox_plan is None:
         return None
     if os.name == "nt":
-        raise ValueError(
-            "worker_sandbox_not_supported: sandbox profiles require POSIX support"
-        )
-    if sandbox_profile not in {"restricted", "strict"}:
-        raise ValueError(
-            f"worker_sandbox_unknown_profile: unsupported profile '{sandbox_profile}'"
-        )
+        raise ValueError("worker_sandbox_not_supported: sandbox plan requires POSIX support")
 
     try:
         import resource
@@ -144,8 +160,9 @@ def _build_worker_sandbox_preexec(
         ) from exc
 
     def _preexec() -> None:
-        _disable_core_dumps(resource)
-        if sandbox_profile == "strict":
+        if sandbox_plan.require_rlimit_core:
+            _disable_core_dumps(resource)
+        if sandbox_plan.require_rlimit_nofile:
             _cap_open_files(resource, maximum=128)
 
     return _preexec

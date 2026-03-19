@@ -4,6 +4,7 @@ import sys
 
 import pytest
 
+from gateway.sandbox_capability import SandboxCapabilities
 from gateway.process_manager import ProcessManager
 
 
@@ -58,3 +59,24 @@ def test_spawn_worker_restricted_profile_disables_core_dumps(tmp_path) -> None:
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["core"][0] == 0
+
+
+def test_spawn_worker_rejects_restrictive_profile_when_capabilities_missing() -> None:
+    manager = ProcessManager(
+        sandbox_capabilities=SandboxCapabilities(
+            platform="linux",
+            supports_posix_preexec=False,
+            supports_rlimit_core=False,
+            supports_rlimit_nofile=False,
+            supports_seccomp=False,
+            supports_cgroup_v2=False,
+            supports_job_object=False,
+        )
+    )
+
+    with pytest.raises(ValueError, match="worker_sandbox_capability_missing"):
+        manager.spawn_worker(
+            "worker_restricted",
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            sandbox_profile="restricted",
+        )
