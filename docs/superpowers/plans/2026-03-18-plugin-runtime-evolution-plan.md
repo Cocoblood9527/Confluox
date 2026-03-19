@@ -43,7 +43,7 @@
 - Create/Test: `gateway/tests/test_plugin_manifest.py`
 - Modify: `gateway/tests/test_plugin_loader.py`
 
-- [ ] **Step 1: Write failing tests for typed manifest parsing**
+- [x] **Step 1: Write failing tests for typed manifest parsing**
 
 Cover:
 
@@ -53,12 +53,12 @@ Cover:
 - invalid `entry`
 - permissions schema validation
 
-- [ ] **Step 2: Run the manifest-focused tests to verify they fail**
+- [x] **Step 2: Run the manifest-focused tests to verify they fail**
 
 Run: `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_manifest.py gateway/tests/test_plugin_loader.py -q`
 Expected: FAIL because typed manifest parsing does not exist yet.
 
-- [ ] **Step 3: Implement `plugin_manifest.py` and migrate loader reads onto it**
+- [x] **Step 3: Implement `plugin_manifest.py` and migrate loader reads onto it**
 
 Represent manifest fields with typed objects, keeping backward compatibility for current API plugin manifests while allowing new optional fields such as:
 
@@ -66,12 +66,12 @@ Represent manifest fields with typed objects, keeping backward compatibility for
 - `permissions`
 - `command`
 
-- [ ] **Step 4: Re-run the manifest-focused tests**
+- [x] **Step 4: Re-run the manifest-focused tests**
 
 Run: `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_manifest.py gateway/tests/test_plugin_loader.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit the manifest slice**
+- [x] **Step 5: Commit the manifest slice**
 
 ```bash
 git add gateway/gateway/plugin_manifest.py gateway/gateway/plugin_loader.py gateway/tests/test_plugin_manifest.py gateway/tests/test_plugin_loader.py
@@ -87,7 +87,7 @@ git commit -m "feat: add typed plugin manifest parsing"
 - Create/Test: `gateway/tests/test_plugin_runtime.py`
 - Modify: `gateway/tests/test_process_manager.py`
 
-- [ ] **Step 1: Write failing tests for worker plugin startup**
+- [x] **Step 1: Write failing tests for worker plugin startup**
 
 Add tests that verify:
 
@@ -95,12 +95,12 @@ Add tests that verify:
 - worker processes are tracked for shutdown
 - invalid worker manifests are rejected before spawn
 
-- [ ] **Step 2: Run the worker-runtime tests to verify they fail**
+- [x] **Step 2: Run the worker-runtime tests to verify they fail**
 
 Run: `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_runtime.py gateway/tests/test_process_manager.py -q`
 Expected: FAIL because worker runtime support does not exist yet.
 
-- [ ] **Step 3: Implement the worker runtime abstraction**
+- [x] **Step 3: Implement the worker runtime abstraction**
 
 Create a minimal runtime layer that can:
 
@@ -108,16 +108,16 @@ Create a minimal runtime layer that can:
 - register those processes with `ProcessManager`
 - return status metadata suitable for future diagnostics
 
-- [ ] **Step 4: Update gateway startup to initialize worker plugins after manifest discovery**
+- [x] **Step 4: Update gateway startup to initialize worker plugins after manifest discovery**
 
 Keep in-process API route plugins working exactly as before while starting worker plugins through the new runtime layer.
 
-- [ ] **Step 5: Re-run the worker-runtime tests**
+- [x] **Step 5: Re-run the worker-runtime tests**
 
 Run: `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_runtime.py gateway/tests/test_process_manager.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Commit the worker-runtime slice**
+- [x] **Step 6: Commit the worker-runtime slice**
 
 ```bash
 git add gateway/gateway/plugin_runtime.py gateway/gateway/process_manager.py gateway/gateway/main.py gateway/tests/test_plugin_runtime.py gateway/tests/test_process_manager.py
@@ -130,7 +130,7 @@ git commit -m "feat: add managed worker plugin runtime"
 - Modify: `docs/zh-CN/plugin-guide.md`
 - Modify: `docs/en/plugin-guide.md`
 
-- [ ] **Step 1: Update the plugin guides with new manifest fields**
+- [x] **Step 1: Update the plugin guides with new manifest fields**
 
 Document:
 
@@ -139,16 +139,16 @@ Document:
 - `permissions`
 - `command`
 
-- [ ] **Step 2: Add one worker-plugin example to each guide**
+- [x] **Step 2: Add one worker-plugin example to each guide**
 
 Keep the example narrow and aligned with the implemented runtime model.
 
-- [ ] **Step 3: Re-read both docs for compatibility language**
+- [x] **Step 3: Re-read both docs for compatibility language**
 
 Run: `rg -n "worker|permissions|runtime|command" docs/zh-CN/plugin-guide.md docs/en/plugin-guide.md`
 Expected: the new model is documented in both languages without implying full process sandboxing already exists.
 
-- [ ] **Step 4: Commit the documentation slice**
+- [x] **Step 4: Commit the documentation slice**
 
 ```bash
 git add docs/zh-CN/plugin-guide.md docs/en/plugin-guide.md
@@ -163,16 +163,45 @@ git commit -m "docs: describe worker plugin runtime and manifest permissions"
 - Verify: `docs/en/plugin-guide.md`
 - Verify: `docs/zh-CN/plugin-guide.md`
 
-- [ ] **Step 1: Run the full gateway test suite**
+- [x] **Step 1: Run the full gateway test suite**
 
 Run: `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests -q`
 Expected: PASS.
 
-- [ ] **Step 2: Perform a manual worker-plugin smoke test**
+- [x] **Step 2: Perform a manual worker-plugin smoke test**
 
 Create a temporary worker plugin under `plugins/` that runs a simple long-lived command, then start the app and confirm the worker launches and is terminated through the existing shutdown path.
 
-- [ ] **Step 3: Capture what remains intentionally out of scope**
+- [x] **Step 3: Capture what remains intentionally out of scope**
 
 Record in the PR or execution notes that this phase does not yet provide full process sandboxing or API-plugin out-of-process isolation.
 
+---
+
+## Execution Notes
+
+- Plugin runtime evolution scope is present in tracked implementation files:
+  - `gateway/gateway/plugin_manifest.py`
+  - `gateway/gateway/plugin_runtime.py`
+  - `gateway/gateway/plugin_loader.py`
+  - `gateway/gateway/process_manager.py`
+  - `gateway/gateway/main.py`
+  - `docs/en/plugin-guide.md`
+  - `docs/zh-CN/plugin-guide.md`
+- Manifest-focused verification:
+  - `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_manifest.py gateway/tests/test_plugin_loader.py -q` -> `31 passed`
+- Worker runtime verification:
+  - `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests/test_plugin_runtime.py gateway/tests/test_process_manager.py -q` -> `14 passed`
+- Docs keyword verification:
+  - `rg -n "worker|permissions|runtime|command" docs/zh-CN/plugin-guide.md docs/en/plugin-guide.md`
+- Regression verification:
+  - `PYTHONPATH=$PWD/gateway python3 -m pytest gateway/tests -q` -> `121 passed`
+  - `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> passed
+  - `cd frontend && npm run build` -> passed
+- Manual worker-plugin smoke:
+  - Created temporary plugin `plugins/_tmp_worker_smoke/manifest.json` with `type: "worker"` and a long-lived Python command.
+  - Started worker via `discover_worker_plugins` + `start_worker_plugins` with default worker permission/sandbox policies.
+  - Confirmed `ProcessManager` tracked worker as running, then `terminate_all()` transitioned it to not running.
+  - Removed temporary plugin directory after verification.
+- Out-of-scope boundary retained:
+  - This phase still does not provide full process sandboxing or API-plugin out-of-process isolation.
