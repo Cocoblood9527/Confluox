@@ -18,10 +18,11 @@ from gateway.auth import BearerAuthMiddleware
 from gateway.bootstrap import read_bootstrap_config
 from gateway.config import parse_config
 from gateway.host_liveness import start_host_liveness_watch
+from gateway.plugin_activation import PluginActivationController
 from gateway.plugin_loader import (
     PluginContext,
-    activate_plugin_descriptors,
     discover_api_plugins,
+    register_lazy_api_plugin_activation,
 )
 from gateway.plugin_policy import (
     ApiPluginExecutionPolicy,
@@ -190,6 +191,39 @@ def default_api_execution_policy(
     return ApiPluginExecutionPolicy(allowed_modes=tuple(allowed_modes))
 
 
+def configure_api_plugins_for_app(
+    *,
+    app: FastAPI,
+    plugins_dir: Path,
+    context: PluginContext,
+    trust_policy: ApiPluginTrustPolicy | None = None,
+    execution_policy: ApiPluginExecutionPolicy | None = None,
+    out_of_process_boot_timeout_seconds: float = 3.0,
+    out_of_process_max_active_plugins: int | None = None,
+    out_of_process_proxy_circuit_failure_threshold: int = 3,
+    out_of_process_proxy_circuit_open_seconds: float = 5.0,
+) -> PluginActivationController:
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        trust_policy=trust_policy,
+        execution_policy=execution_policy,
+    )
+    activation = PluginActivationController(plugin_names=[descriptor.name for descriptor in descriptors])
+    register_lazy_api_plugin_activation(
+        app=app,
+        descriptors=descriptors,
+        context=context,
+        activation=activation,
+        out_of_process_boot_timeout_seconds=out_of_process_boot_timeout_seconds,
+        out_of_process_max_active_plugins=out_of_process_max_active_plugins,
+        out_of_process_proxy_circuit_failure_threshold=out_of_process_proxy_circuit_failure_threshold,
+        out_of_process_proxy_circuit_open_seconds=out_of_process_proxy_circuit_open_seconds,
+    )
+    app.state.plugin_activation_controller = activation
+    app.state.plugin_descriptors = tuple(descriptors)
+    return activation
+
+
 def run_gateway(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     config = parse_config(args)
@@ -224,8 +258,10 @@ def run_gateway(argv: list[str] | None = None) -> None:
         resource_resolver=get_resource_path,
     )
     plugins_dir = default_plugins_dir()
-    plugin_descriptors = discover_api_plugins(
-        plugins_dir,
+    configure_api_plugins_for_app(
+        app=app,
+        plugins_dir=plugins_dir,
+        context=plugin_context,
         trust_policy=default_api_trust_policy(
             plugins_dir=plugins_dir,
             trusted_roots=config.trusted_api_plugin_roots,
@@ -234,10 +270,6 @@ def run_gateway(argv: list[str] | None = None) -> None:
         execution_policy=default_api_execution_policy(
             allowed_modes=config.allowed_api_execution_modes,
         ),
-    )
-    activate_plugin_descriptors(
-        plugin_descriptors,
-        plugin_context,
         out_of_process_boot_timeout_seconds=config.api_out_of_process_boot_timeout_seconds,
         out_of_process_max_active_plugins=config.api_out_of_process_max_active_plugins,
         out_of_process_proxy_circuit_failure_threshold=config.api_out_of_process_circuit_failure_threshold,

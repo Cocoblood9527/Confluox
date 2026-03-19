@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -15,7 +16,9 @@ from gateway.plugin_loader import (
     PluginContext,
     activate_plugin_descriptors,
     discover_api_plugins,
+    register_lazy_api_plugin_activation,
 )
+from gateway.plugin_activation import PluginActivationController
 from gateway.process_manager import ProcessManager
 
 
@@ -157,7 +160,7 @@ def test_discovery_does_not_import_entry_modules(tmp_path) -> None:
     assert marker_file.exists() is False
 
 
-def test_activation_happens_only_when_requested(tmp_path) -> None:
+def test_first_request_triggers_lazy_activation(tmp_path) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "example_api"
     plugin_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +180,7 @@ def test_activation_happens_only_when_requested(tmp_path) -> None:
                 "from fastapi import APIRouter",
                 "",
                 "def setup(context):",
-                "    router = APIRouter(prefix='/api/example')",
+                "    router = APIRouter(prefix='/api/example_api')",
                 "",
                 "    @router.get('')",
                 "    def read_example():",
@@ -198,17 +201,90 @@ def test_activation_happens_only_when_requested(tmp_path) -> None:
         resource_resolver=lambda relative_path: relative_path,
     )
     descriptors = discover_api_plugins(plugins_dir)
+    activation = PluginActivationController(plugin_names=[descriptor.name for descriptor in descriptors])
+    register_lazy_api_plugin_activation(
+        app=app,
+        descriptors=descriptors,
+        context=context,
+        activation=activation,
+    )
     client = TestClient(app)
 
-    not_loaded = client.get("/api/example")
-    assert not_loaded.status_code == 404
+    before = activation.snapshot()["example_api"]
+    assert before.state == "inactive"
 
-    loaded = activate_plugin_descriptors(descriptors, context)
-    assert loaded == ["example_api"]
-
-    response = client.get("/api/example")
+    response = client.get("/api/example_api")
     assert response.status_code == 200
     assert response.json() == {"plugin": "example_api"}
+
+    after = activation.snapshot()["example_api"]
+    assert after.state == "active"
+
+
+def test_parallel_first_requests_activate_plugin_only_once(tmp_path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "parallel_api"
+    activation_counter = tmp_path / "activation-count.txt"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = {
+        "type": "api",
+        "entry": "entry:setup",
+        "name": "parallel_api",
+    }
+    (plugin_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (plugin_dir / "entry.py").write_text(
+        "\n".join(
+            [
+                "import time",
+                "from fastapi import APIRouter",
+                "",
+                "def setup(context):",
+                "    time.sleep(0.1)",
+                f"    with open({repr(str(activation_counter))}, 'a', encoding='utf-8') as marker:",
+                "        marker.write('activated\\n')",
+                "    router = APIRouter(prefix='/api/parallel_api')",
+                "",
+                "    @router.get('')",
+                "    def read_example():",
+                "        return {'plugin': 'parallel_api'}",
+                "",
+                "    context.app.include_router(router)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=None,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(plugins_dir)
+    activation = PluginActivationController(plugin_names=[descriptor.name for descriptor in descriptors])
+    register_lazy_api_plugin_activation(
+        app=app,
+        descriptors=descriptors,
+        context=context,
+        activation=activation,
+    )
+    client = TestClient(app)
+
+    def request_once() -> tuple[int, dict[str, str]]:
+        response = client.get("/api/parallel_api")
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(lambda _: request_once(), range(2))
+
+    assert first[0] == 200
+    assert second[0] == 200
+    assert first[1]["plugin"] == "parallel_api"
+    assert second[1]["plugin"] == "parallel_api"
+    assert activation_counter.read_text(encoding="utf-8").splitlines() == ["activated"]
 
 
 def test_discovery_ignores_non_api_plugins(tmp_path) -> None:

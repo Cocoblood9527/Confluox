@@ -13,6 +13,7 @@ from typing import Any, Callable, Iterable, Mapping
 import httpx
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from gateway.plugin_activation import PluginActivationController
 from gateway.plugin_manifest import parse_plugin_manifest
 from gateway.plugin_policy import (
     ApiPluginExecutionPolicy,
@@ -169,6 +170,60 @@ def activate_plugin_descriptors(
 def load_api_plugins(plugins_dir: str | Path, context: PluginContext) -> list[str]:
     descriptors = discover_api_plugins(plugins_dir)
     return activate_plugin_descriptors(descriptors, context)
+
+
+def register_lazy_api_plugin_activation(
+    *,
+    app: FastAPI,
+    descriptors: Iterable[PluginDescriptor],
+    context: PluginContext,
+    activation: PluginActivationController,
+    out_of_process_boot_timeout_seconds: float = 3.0,
+    out_of_process_max_active_plugins: int | None = None,
+    out_of_process_proxy_circuit_failure_threshold: int = 3,
+    out_of_process_proxy_circuit_open_seconds: float = 5.0,
+) -> None:
+    descriptor_list = list(descriptors)
+    descriptor_by_name = {descriptor.name: descriptor for descriptor in descriptor_list}
+    activation.register_plugins(list(descriptor_by_name.keys()))
+
+    @app.middleware("http")
+    async def ensure_plugin_activation(request: Request, call_next):
+        path = request.url.path
+        descriptor = _find_descriptor_for_path(path, descriptor_list)
+        if descriptor is None:
+            return await call_next(request)
+
+        status = activation.ensure_activated(
+            descriptor.name,
+            lambda: activate_plugin_descriptors(
+                [descriptor],
+                context,
+                out_of_process_boot_timeout_seconds=out_of_process_boot_timeout_seconds,
+                out_of_process_max_active_plugins=out_of_process_max_active_plugins,
+                out_of_process_proxy_circuit_failure_threshold=out_of_process_proxy_circuit_failure_threshold,
+                out_of_process_proxy_circuit_open_seconds=out_of_process_proxy_circuit_open_seconds,
+            ),
+        )
+        if status.state == "failed":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": status.error_code or "plugin_activation_failed",
+                    "plugin": descriptor.name,
+                    "detail": status.error_message,
+                },
+            )
+
+        return await call_next(request)
+
+
+def _find_descriptor_for_path(path: str, descriptors: list[PluginDescriptor]) -> PluginDescriptor | None:
+    for descriptor in descriptors:
+        prefix = descriptor.route_prefix
+        if path == prefix or path.startswith(prefix + "/"):
+            return descriptor
+    return None
 
 
 def _load_module(module_path: Path, plugin_name: str):
