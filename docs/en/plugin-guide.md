@@ -90,15 +90,28 @@ Startup trust configuration:
 - `in_process` (default): current supported mode
 - `out_of_process`: policy-contract mode for future isolation path
 
+When `execution_mode` is `out_of_process`, `command` is required in manifest:
+
+- `command`: argv array used to launch the plugin process
+
 Current behavior:
 
 - discovery enforces host allowlist for api execution modes
-- activation currently supports only `in_process`
-- `out_of_process` descriptors are rejected at activation with explicit reason
+- activation launches `out_of_process` plugin command and performs health-check handshake
+- requests are proxied under `/api/<plugin_name>`
+- startup failures return explicit diagnostics (`api_oop_boot_timeout`, `api_oop_process_exited`)
+- proxy runtime failures return structured `502` payloads (`api_oop_upstream_unavailable`)
 
 Startup execution mode configuration:
 
 - `--allowed-api-execution-mode` / `CONFLUOX_ALLOWED_API_EXECUTION_MODES`: allowlisted modes for discovery policy
+- `--api-out-of-process-boot-timeout-seconds` / `CONFLUOX_API_OOP_BOOT_TIMEOUT_SECONDS`: out-of-process boot timeout
+
+Out-of-process plugin runtime contract:
+
+- host injects `CONFLUOX_PLUGIN_PORT`
+- host injects `CONFLUOX_PLUGIN_PREFIX`
+- plugin must expose `GET /__confluox/health` and return `200` when ready
 
 ## Entry Function
 

@@ -90,15 +90,28 @@ plugins/
 - `in_process`（默认）：当前支持的执行模式
 - `out_of_process`：为后续隔离路径预留的策略契约模式
 
+当 `execution_mode=out_of_process` 时，manifest 必须提供 `command`：
+
+- `command`：启动插件进程的命令数组
+
 当前行为：
 
 - 插件发现阶段会按 host allowlist 校验 execution mode
-- 激活阶段当前仅支持 `in_process`
-- `out_of_process` 描述符在激活阶段会被显式拒绝并给出原因
+- 激活阶段会拉起 `out_of_process` 插件进程并执行健康检查握手
+- 请求会代理到 `/api/<plugin_name>` 前缀
+- 启动失败会返回显式诊断（`api_oop_boot_timeout`、`api_oop_process_exited`）
+- 代理运行时失败会返回结构化 `502` 响应（`api_oop_upstream_unavailable`）
 
 启动时执行模式配置：
 
 - `--allowed-api-execution-mode` / `CONFLUOX_ALLOWED_API_EXECUTION_MODES`：发现阶段可用模式白名单
+- `--api-out-of-process-boot-timeout-seconds` / `CONFLUOX_API_OOP_BOOT_TIMEOUT_SECONDS`：out-of-process 启动超时配置
+
+Out-of-process 插件运行时契约：
+
+- host 注入 `CONFLUOX_PLUGIN_PORT`
+- host 注入 `CONFLUOX_PLUGIN_PREFIX`
+- 插件必须提供 `GET /__confluox/health`，ready 时返回 `200`
 
 ## 入口函数
 
