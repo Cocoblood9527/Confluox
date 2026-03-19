@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,8 +88,6 @@ def _resolve_platform_name(platform_name: str | None) -> str:
 
 
 def _supports_posix_preexec(platform_name: str) -> bool:
-    if os.name == "nt":
-        return False
     return platform_name.startswith(("linux", "darwin", "freebsd", "openbsd", "netbsd"))
 
 

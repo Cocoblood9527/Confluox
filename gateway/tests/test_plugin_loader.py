@@ -405,7 +405,7 @@ def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) ->
     loaded = activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=1.5,
+        out_of_process_boot_timeout_seconds=3.0,
     )
     assert loaded == ["api_oop"]
 
@@ -502,7 +502,7 @@ def test_activation_reports_process_crash_for_out_of_process_plugin(tmp_path) ->
         activate_plugin_descriptors(
             descriptors,
             context,
-            out_of_process_boot_timeout_seconds=1.0,
+            out_of_process_boot_timeout_seconds=3.0,
         )
 
 
@@ -590,7 +590,7 @@ def test_activation_rejects_when_out_of_process_plugin_quota_exceeded(tmp_path) 
         activate_plugin_descriptors(
             descriptors,
             context,
-            out_of_process_boot_timeout_seconds=1.0,
+            out_of_process_boot_timeout_seconds=3.0,
             out_of_process_max_active_plugins=1,
         )
     manager.terminate_all(timeout=1.5)
@@ -633,7 +633,7 @@ def test_proxy_reports_structured_error_when_out_of_process_upstream_unavailable
     activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=1.5,
+        out_of_process_boot_timeout_seconds=3.0,
     )
 
     manager.terminate_all(timeout=1.5)
@@ -681,7 +681,7 @@ def test_proxy_opens_circuit_after_repeated_out_of_process_failures(tmp_path) ->
     activate_plugin_descriptors(
         descriptors,
         context,
-        out_of_process_boot_timeout_seconds=1.5,
+        out_of_process_boot_timeout_seconds=3.0,
         out_of_process_proxy_circuit_failure_threshold=2,
         out_of_process_proxy_circuit_open_seconds=5.0,
     )

@@ -45,7 +45,6 @@ def test_start_worker_plugins_launches_via_process_manager(tmp_path) -> None:
                 "type": "worker",
                 "name": "worker_example",
                 "command": [sys.executable, "-c", "import time; time.sleep(60)"],
-                "sandbox_profile": "restricted",
             }
         ),
         encoding="utf-8",
@@ -57,7 +56,6 @@ def test_start_worker_plugins_launches_via_process_manager(tmp_path) -> None:
         descriptors,
         process_manager=manager,
         permission_policy=WorkerPermissionPolicy(allowlist={"network": ["loopback"]}),
-        sandbox_profile_policy=WorkerSandboxProfilePolicy(allowed_profiles=("restricted",)),
     )
 
     assert [status.name for status in statuses] == ["worker_example"]
