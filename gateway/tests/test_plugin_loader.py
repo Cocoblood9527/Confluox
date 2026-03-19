@@ -362,6 +362,64 @@ def test_activation_starts_out_of_process_plugin_and_proxies_routes(tmp_path) ->
     context.process_manager.terminate_all(timeout=1.5)
 
 
+def test_activation_ignores_proxy_env_for_local_out_of_process_routes(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugin_dir = plugins_dir / "api_oop_proxy_env"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "type": "api",
+                "entry": "entry:setup",
+                "name": "api_oop_proxy_env",
+                "execution_mode": "out_of_process",
+                "command": _oop_server_command(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin_dir / "entry.py").write_text(
+        "def setup(context):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    # Local plugin transport should never depend on ambient proxy variables.
+    monkeypatch.setenv("HTTP_PROXY", "http://10.255.255.1:12345")
+    monkeypatch.setenv("HTTPS_PROXY", "http://10.255.255.1:12345")
+    monkeypatch.setenv("ALL_PROXY", "http://10.255.255.1:12345")
+    monkeypatch.setenv("NO_PROXY", "")
+
+    app = create_app()
+    manager = ProcessManager()
+    context = PluginContext(
+        app=app,
+        data_dir=str(tmp_path),
+        auth=None,
+        process_manager=manager,
+        resource_resolver=lambda relative_path: relative_path,
+    )
+    descriptors = discover_api_plugins(
+        plugins_dir,
+        execution_policy=ApiPluginExecutionPolicy(allowed_modes=("in_process", "out_of_process")),
+    )
+    loaded = activate_plugin_descriptors(
+        descriptors,
+        context,
+        out_of_process_boot_timeout_seconds=1.5,
+    )
+    assert loaded == ["api_oop_proxy_env"]
+
+    client = TestClient(app)
+    response = client.get("/api/api_oop_proxy_env")
+    assert response.status_code == 200
+    assert response.json()["path"] == "/api/api_oop_proxy_env"
+
+    manager.terminate_all(timeout=1.5)
+
+
 def test_activation_reports_boot_timeout_for_out_of_process_plugin(tmp_path) -> None:
     plugins_dir = tmp_path / "plugins"
     plugin_dir = plugins_dir / "api_oop_timeout"

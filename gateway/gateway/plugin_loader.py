@@ -255,6 +255,7 @@ def _wait_for_out_of_process_health(
                 health_url,
                 headers={_PLUGIN_AUTH_HEADER: auth_token},
                 timeout=0.2,
+                trust_env=False,
             )
             if response.status_code == 200:
                 return
@@ -309,7 +310,7 @@ def _register_proxy_route(
         headers[_PLUGIN_AUTH_HEADER] = auth_token
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 upstream = await client.request(
                     request.method,
                     target_url,
