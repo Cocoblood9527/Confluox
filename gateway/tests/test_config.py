@@ -33,28 +33,7 @@ def test_parse_config_from_env() -> None:
     assert config.host_pid == 4321
 
 
-def test_parse_config_accepts_bootstrap_fields_from_cli() -> None:
-    config = parse_config(
-        [
-            "--ready-file",
-            "/tmp/gateway.ready.json",
-            "--host-pid",
-            "4321",
-            "--data-dir",
-            "/tmp/confluox-data",
-            "--auth-token",
-            "secret-token",
-            "--allowed-origin",
-            "https://app.local",
-        ]
-    )
-
-    assert config.data_dir == "/tmp/confluox-data"
-    assert config.auth_token == "secret-token"
-    assert config.allowed_origin == "https://app.local"
-
-
-def test_parse_config_accepts_bootstrap_fields_from_env() -> None:
+def test_parse_config_does_not_surface_bootstrap_fields_from_env() -> None:
     config = parse_config(
         [
             "--ready-file",
@@ -69,21 +48,25 @@ def test_parse_config_accepts_bootstrap_fields_from_env() -> None:
         },
     )
 
-    assert config.data_dir == "/tmp/confluox-data-env"
-    assert config.auth_token == "secret-token-env"
-    assert config.allowed_origin == "https://env.app.local"
+    assert not hasattr(config, "data_dir")
+    assert not hasattr(config, "auth_token")
+    assert not hasattr(config, "allowed_origin")
 
 
-def test_parse_config_rejects_wildcard_allowed_origin() -> None:
-    with pytest.raises(ValueError, match="allowed_origin"):
+def test_parse_config_rejects_bootstrap_only_cli_args() -> None:
+    with pytest.raises(SystemExit):
         parse_config(
             [
                 "--ready-file",
                 "/tmp/gateway.ready.json",
                 "--host-pid",
                 "4321",
+                "--data-dir",
+                "/tmp/confluox-data",
+                "--auth-token",
+                "secret-token",
                 "--allowed-origin",
-                "*",
+                "https://app.local",
             ]
         )
 
